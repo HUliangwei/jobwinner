@@ -50,3 +50,10 @@ Thumbs.db
 .superpowers/
 docs/superpowers/
 AGENTS.md
+# Personal resumes (multi-resume feature inputs)
+resume_embodied.md
+resume_ic.md
+resumes_tmp/
+
+# Archived legacy config backup (GBK-mojibake, not part of the app)
+docs/archive/

@@ -31,12 +31,19 @@ class ScraperBackgroundTests(unittest.TestCase):
         task = WorkbenchTask(id="task-1", mode="collect", label="单独采集")
         config = {"search": {"keywords": ["AI"]}}
 
-        def scrape_with_progress(collect_config, _keywords, *, collected_job_ids=None):
-            collect_config["_workbench_collect_progress"]({"seen": 9, "new": 3, "duplicate": 4})
-            collected_job_ids.extend(["new-1", "new-2", "new-3"])
-            return 3
+        calls = {"n": 0}
 
-        def score_with_progress(score_config):
+        def scrape_with_progress(collect_config, _keywords, *, limit=None, collected_job_ids=None):
+            collect_config["_workbench_collect_progress"]({"seen": 9, "new": 3, "duplicate": 4})
+            # The batch pipeline loops until a batch yields no new jobs; return
+            # new jobs only on the first call so the loop terminates.
+            calls["n"] += 1
+            if calls["n"] == 1 and collected_job_ids is not None:
+                collected_job_ids.extend(["new-1", "new-2", "new-3"])
+                return 3
+            return 0
+
+        def score_with_progress(score_config, *, scope="pending", limit=None, job_ids=None, force_rescore=False):
             score_config["_workbench_score_progress"]({
                 "completed": 3,
                 "total": 3,

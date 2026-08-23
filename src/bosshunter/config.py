@@ -64,6 +64,7 @@ AI_SERVICE_PRESETS: dict[str, dict[str, str]] = {
 DEFAULTS: dict[str, Any] = {
     "profile": {
         "resume_path": "./resume.md",
+        "resume_paths": [],
         "resume_output_dir": "./data/resumes",
         "target_cities": ["北京"],
         "salary_min": 0,
@@ -78,13 +79,15 @@ DEFAULTS: dict[str, Any] = {
         "cities": [],  # Empty = fallback to profile.target_cities
         "city_codes": {},
         "max_pages": 3,
+        "batch_size": 20,  # Pipeline: new jobs collected per batch before scoring
+        "collect_rescan_minutes": 10,  # Resident mode: re-scan delay between collect rounds
     },
     "scoring": {
         "threshold": 71,
         "max_candidates": 20,
     },
     "throttle": {
-        "daily_limit": 30,
+        "daily_limit": 20,
         "interval_min": 60,
         "interval_max": 180,
         "browse_before_greet": True,

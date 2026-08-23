@@ -227,8 +227,8 @@ class MonitorReplyDismissTests(unittest.TestCase):
             finally:
                 verify_db.close()
 
-        self.assertEqual(action, "needs_resume")
-        self.assertEqual(history, ["needs_resume"])
+        self.assertEqual(action, "resume_pending")
+        self.assertEqual(history, ["resume_pending"])
         generate_resume.assert_called_once()
 
     def test_failed_tailored_resume_generation_does_not_mark_job_needs_resume(self):

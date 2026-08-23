@@ -46,15 +46,38 @@ type AiService = keyof typeof AI_SERVICES
 export default function ConfigPage() {
   const { config, schema, loading, saving, dirty, error, message, updateConfig, saveConfig, resetConfig } = useConfig()
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({ profile: true, search: true })
-  const [resumeInfo, setResumeInfo] = useState<any>(null)
+  const [resumeList, setResumeList] = useState<ResumeItem[]>([])
   const [resumeUploadError, setResumeUploadError] = useState('')
   const [aiTest, setAiTest] = useState<{ testing: boolean; ok?: boolean; message?: string }>({ testing: false })
   const [cityOptions, setCityOptions] = useState<CityOption[]>([])
   const [cityRefreshing, setCityRefreshing] = useState(false)
   const [cityMessage, setCityMessage] = useState('')
 
+  const refreshResumes = async (): Promise<ResumeItem[]> => {
+    try {
+      const res = await fetch('/api/resume', { cache: 'no-store' })
+      if (!res.ok) return []
+      const data = await res.json()
+      const list = normalizeResumeData(data)
+      setResumeList(list)
+      return list
+    } catch {
+      // 后端不可用时保持当前列表
+      return []
+    }
+  }
+
+  // 用最新列表同步配置字段：主简历路径（旧字段）+ 多份路径列表（新字段）。
+  const syncResumeConfig = (list: ResumeItem[]) => {
+    updateConfig('profile.resume_path', list[0]?.path ?? '')
+    updateConfig(
+      'profile.resume_paths',
+      list.map(item => item.path),
+    )
+  }
+
   useEffect(() => {
-    fetch('/api/resume').then(r => r.json()).then(setResumeInfo).catch(() => {})
+    refreshResumes()
     fetch('/api/cities', { cache: 'no-store' })
       .then(r => r.json())
       .then(data => {
@@ -81,8 +104,10 @@ export default function ConfigPage() {
         setResumeUploadError(data.error || '简历上传失败')
         return
       }
-      setResumeInfo({ filename: data.filename, size: data.size, path: data.path })
-      updateConfig('profile.resume_path', data.path)
+      // 后端会在保存配置后把新简历追加到多份列表（profile.resume_paths）；
+      // 上传成功后刷新列表，并按刷新结果同步配置字段（旧后端上传会替换主简历）。
+      const list = await refreshResumes()
+      syncResumeConfig(list)
     } catch {
       setResumeUploadError('网络错误，简历上传失败')
     } finally {
@@ -90,10 +115,25 @@ export default function ConfigPage() {
     }
   }
 
-  const handleResumeDelete = async () => {
-    await fetch('/api/resume', { method: 'DELETE' })
-    setResumeInfo(null)
-    updateConfig('profile.resume_path', '')
+  const handleResumeDelete = async (item: ResumeItem) => {
+    try {
+      const res = await fetch('/api/resume', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: item.path }),
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok && data?.success) {
+        // 后端删除指定 path（新后端）或清空主简历（旧后端）；
+        // 刷新列表后按刷新结果同步配置字段。
+        const list = await refreshResumes()
+        syncResumeConfig(list)
+      } else {
+        setResumeUploadError((data && (data.error || data.message)) || '简历删除失败')
+      }
+    } catch {
+      setResumeUploadError('网络错误，简历删除失败')
+    }
   }
 
   const handleAiTest = async () => {
@@ -209,16 +249,31 @@ export default function ConfigPage() {
         {/* Profile Section */}
         <SectionCard title="个人信息" sectionKey="profile" expanded={expandedSections} toggle={toggleSection}>
           <div className="space-y-4">
-            {/* Resume upload */}
+            {/* Resume list */}
             <div>
-              <label className="block text-xs text-foreground mb-2">简历文件</label>
-              {resumeInfo ? (
-                <div className="flex items-center gap-3 rounded-md border border-card-border bg-[#FFFCFA] p-3">
-                  <span className="text-sm font-bold text-foreground">📄 {resumeInfo.filename}</span>
-                  <span className="text-xs text-muted">({(resumeInfo.size / 1024).toFixed(1)} KB)</span>
-                  <button onClick={handleResumeDelete} className="ml-auto text-red-400 hover:text-red-300">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+              <label className="block text-xs text-foreground mb-2">
+                多份简历
+                <span className="ml-1 text-muted">（第一份为主简历，AI 评分时按岗位方向自动选择最匹配的一份）</span>
+              </label>
+              {resumeList.length > 0 ? (
+                <div className="space-y-2">
+                  {resumeList.map((item, index) => (
+                    <div key={item.path || `${index}-${item.filename}`} className="flex items-center gap-3 rounded-md border border-card-border bg-[#FFFCFA] p-3">
+                      <span className="text-sm font-bold text-foreground">📄 {item.filename}</span>
+                      <span className="text-xs text-muted">({Number.isFinite(item.size) ? (item.size / 1024).toFixed(1) : '?'} KB)</span>
+                      {item.isPrimary && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-black text-primary">主简历</span>
+                      )}
+                      <button onClick={() => handleResumeDelete(item)} className="ml-auto text-red-400 hover:text-red-300" title="删除该简历">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-card-border p-3 text-xs text-muted transition-colors hover:border-primary/50 hover:bg-[#FFFCFA]">
+                    <Upload className="h-4 w-4" />
+                    上传简历追加到列表 (.md、.docx、.pdf)
+                    <input type="file" accept=".md,.docx,.pdf,application/pdf" onChange={handleResumeUpload} className="hidden" />
+                  </label>
                 </div>
               ) : (
                 <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-card-border p-6 transition-colors hover:border-primary/50 hover:bg-[#FFFCFA]">
@@ -510,4 +565,45 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   )
+}
+
+// ─── 多简历 ────────────────────────────────
+
+interface ResumeItem {
+  filename: string
+  path: string
+  size: number
+  isPrimary: boolean
+}
+
+/**
+ * 兼容旧 / 新两种 /api/resume 响应：
+ * - 旧：单个对象 { filename, size, path } 或 null
+ * - 新：数组 [{ filename, path, size }]，或 { resume_path: "..." } 字符串形式
+ * 统一归一化为 ResumeItem[]，第一份标记为主简历。
+ */
+function normalizeResumeData(data: unknown): ResumeItem[] {
+  if (Array.isArray(data)) {
+    return data
+      .map((item, index) => {
+        if (item && typeof item === 'object' && typeof (item as any).filename === 'string') {
+          const it = item as any
+          return { filename: it.filename, path: it.path || it.filename, size: Number(it.size) || 0, isPrimary: index === 0 }
+        }
+        return null
+      })
+      .filter((item): item is ResumeItem => item !== null)
+  }
+  // 单对象兼容：{ filename, size, path } / { resume_path: "..." } / null
+  if (data && typeof data === 'object') {
+    const obj = data as any
+    if (typeof obj.resume_path === 'string' && obj.resume_path) {
+      const name = obj.filename || obj.resume_path.split(/[\\/]/).pop() || obj.resume_path
+      return [{ filename: name, path: obj.resume_path, size: Number(obj.size) || 0, isPrimary: true }]
+    }
+    if (typeof obj.path === 'string') {
+      return [{ filename: obj.filename || obj.path.split(/[\\/]/).pop() || obj.path, path: obj.path, size: Number(obj.size) || 0, isPrimary: true }]
+    }
+  }
+  return []
 }

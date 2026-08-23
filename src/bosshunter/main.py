@@ -235,6 +235,37 @@ def run(ctx: click.Context) -> None:
     _hint_star_support()
 
 
+@cli.command(name="check-portal")
+@click.option("--wait", default=6, type=int, help="每页等待秒数（默认6）")
+@click.pass_context
+def check_portal(ctx: click.Context, wait: int) -> None:
+    """巡检官网投递记录页并同步最新状态到看板
+
+    打开各企业官网的投递记录页（如恒玄、兆易），读取官网显示的
+    真实状态原文（人才库 / 简历筛选中 / 简历初筛-未处理 等）并写回
+    数据库 stage 字段，看板随即反映官网最新进度。
+
+    需要 Chrome 已通过 9222 端口连接（bosshunter connect 可检测）。
+    """
+    from bosshunter.executor.portal_tracker import check_portal_progress
+
+    console.print("[bold cyan]═══ 官网投递进度巡检 ═══[/bold cyan]\n")
+    msgs: list[str] = []
+
+    def log(m: str) -> None:
+        msgs.append(m)
+        console.print(f"  {m}")
+
+    result = check_portal_progress(log=log, wait_seconds=wait)
+    updated = result.get("updated", 0)
+    checked = result.get("checked", 0)
+    if updated:
+        console.print(f"\n[bold green]✓ 巡检完成：检查 {checked} 页，更新 {updated} 个岗位进度[/bold green]")
+    else:
+        console.print(f"\n[dim]巡检完成：检查 {checked} 页，无状态变化[/dim]")
+    _hint_web()
+
+
 @cli.command()
 @click.option("--job-id", default=None, help="指定岗位ID生成简历")
 @click.pass_context

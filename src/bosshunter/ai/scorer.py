@@ -3,7 +3,6 @@
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 import json
-from pathlib import Path
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -116,10 +115,20 @@ class ScoreOutcome:
     pause_reason: str = ""
 
 
-def _load_resume(config: dict) -> str:
-    """Load resume from configured path."""
-    resume_path = Path(config.get("profile", {}).get("resume_path", "./resume.md"))
-    if not resume_path.exists():
+def _load_resume(config: dict, job: dict | None = None) -> str:
+    """Load the best-matching resume for a job (or default if no job)."""
+    from bosshunter.ai.resume_picker import select_resume_path_for_job
+    resume_path = None
+    if job:
+        resume_path = select_resume_path_for_job(job, config)
+    if resume_path is None:
+        # Fallback: first existing resume
+        from bosshunter.ai.resume_picker import resume_paths
+        for p in resume_paths(config):
+            if p.exists():
+                resume_path = p
+                break
+    if resume_path is None or not resume_path.exists():
         return ""
     return resume_path.read_text(encoding="utf-8")
 
@@ -495,6 +504,10 @@ def score_jobs(
         remaining_job_ids = [str(job["id"]) for job in pending_jobs]
         _report_checkpoint(config, remaining_job_ids, status="running")
 
+        # Jobs that just crossed the AI threshold this run, whose greeting
+        # should be generated immediately so the user can send directly.
+        new_ready_ids: list[str] = []
+
         def mark_completed(job_id: str) -> None:
             if job_id in remaining_job_ids:
                 remaining_job_ids.remove(job_id)
@@ -558,7 +571,10 @@ def score_jobs(
                     next_job = next(job_iter)
                 except StopIteration:
                     return False
-                future = executor.submit(_score_job_with_ai, next_job, resume, config, max_attempts)
+                # Load the best-matching resume for this specific job at submit
+                # time, so multi-resume configs use the right base resume.
+                job_resume = _load_resume(config, next_job)
+                future = executor.submit(_score_job_with_ai, next_job, job_resume, config, max_attempts)
                 futures[future] = next_job
                 return True
 
@@ -590,6 +606,7 @@ def score_jobs(
                         if result.score >= threshold:
                             update_job_status(db, job["id"], "ready")
                             scored += 1
+                            new_ready_ids.append(str(job["id"]))
                         else:
                             update_job_status(db, job["id"], "filtered")
                             filtered += 1
@@ -624,6 +641,31 @@ def score_jobs(
                 executor.shutdown(wait=False, cancel_futures=True)
             else:
                 executor.shutdown(wait=True)
+
+        # Auto-generate greetings for jobs that just passed the threshold, so
+        # the "确认投递" list shows ready-to-send greetings without a manual
+        # intermediate step. Best-effort: failures never fail the scoring run.
+        if new_ready_ids and not (stop_event is not None and stop_event.is_set()):
+            try:
+                from bosshunter.ai.greeter import generate_greetings
+
+                greet_config = dict(config)
+                greet_config["_workbench_job_ids"] = [j for j in new_ready_ids if j]
+                greet_config.pop("_workbench_stop_event", None)
+                generated = generate_greetings(greet_config, include_ready=True)
+                if generated:
+                    _notify(
+                        config,
+                        f"评分完成：已自动生成 {generated} 条招呼语，可直接在面板确认投递。",
+                    )
+            except OperationCancelled:
+                pass
+            except Exception as exc:
+                _notify(
+                    config,
+                    f"评分后自动生成招呼语失败（不影响评分结果）：{type(exc).__name__}: {exc}",
+                    error=True,
+                )
 
         if prefiltered > 0:
             console.print(f"[dim]  预筛阶段淘汰 {prefiltered} 个岗位（节省 {prefiltered} 次 API 调用）[/dim]")

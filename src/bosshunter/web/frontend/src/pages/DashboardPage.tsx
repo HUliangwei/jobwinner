@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useDashboard, type HistoryItem, type Job, type WorkbenchTask } from '@/hooks/useDashboard'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useDashboard, type FunnelData, type HistoryItem, type Job, type WorkbenchTask } from '@/hooks/useDashboard'
 import { useJobSearch } from '@/hooks/useJobSearch'
 import { Button } from '@/components/ui/button'
 import { JobsTable } from '@/components/dashboard/JobsTable'
@@ -22,15 +22,19 @@ import {
   Download,
   ExternalLink,
   Eye,
+  FileText,
   MessageCircle,
+  Pencil,
   Play,
   RefreshCw,
+  Send,
   Square,
+  Star,
   Trash2,
   XCircle,
 } from 'lucide-react'
 
-type WorkbenchMode = 'full' | 'collect' | 'rescore' | 'monitor'
+type WorkbenchMode = 'full' | 'collect' | 'rescore' | 'score' | 'monitor'
 type DashboardView = 'workbench' | 'jobs' | 'monitor'
 type StatsScope = 'today' | 'total'
 
@@ -51,7 +55,9 @@ function currentTaskStage(logs: string[] = []) {
     const stage = TASK_STAGE_LABELS.find(label => log.includes(label))
     if (stage) return stage
   }
-  return '等待后端返回阶段'
+  const last = logs[logs.length - 1]
+  if (last) return last
+  return '后端已就绪，等待任务指令'
 }
 
 function taskStatusText(status: string) {
@@ -124,23 +130,81 @@ interface PreflightCheck {
   action?: 'config' | 'browser' | ''
 }
 
-const modes: Array<{ mode: WorkbenchMode; title: string; description: string }> = [
+// 流水线管道语义：①采集 → ②评分 → ③确认投递（打招呼合一）→ ④发送 → ⑤监测与发简历
+//（③确认是"今日待确认+待发送招呼语"人工环节，无独立任务卡片；⑤的简历由监测触发）
+const modes: Array<{ mode: WorkbenchMode; title: string; description: string; stage: string }> = [
   {
     mode: 'full',
-    title: '运行全流程',
-    description: '采集 → AI评分 → 确认投递 → 打招呼 → 持续监测，一次跑完整流程。',
+    title: '全流程常驻（可挂机）',
+    description: '采集+评分+监测 三线程并行：持续采集写待评分池、评分 FIFO 消费、监听 HR 回复；常驻运行直到手动停止',
+    stage: '①②⑤',
   },
   {
     mode: 'collect',
-    title: '单独采集',
-    description: '采集岗位、AI评分、确认投递、发送招呼语；完成后不进入持续监测。',
+    title: '独立采集',
+    description: '只采集岗位写入待评分池，不评分',
+    stage: '①',
+  },
+  {
+    mode: 'score',
+    title: '独立评分',
+    description: '对待评分池岗位评分，通过者自动生成招呼语；评完即停',
+    stage: '②',
   },
   {
     mode: 'monitor',
-    title: '单独监测',
-    description: '只监测过往已投递项目；发现 HR 要简历或问题后进入对应处理。',
+    title: '独立监测',
+    description: '监测已投递岗位的 HR 回复/要简历，常驻运行直到手动停止',
+    stage: '⑤',
   },
 ]
+
+// 管道状态条：实时漏斗（采集 → 初筛 → 评分 → 确认 → 发送），颜色随环节推进由浅到深
+// 注：①②③④⑤ 为工作台 5 段结构（③=确认投递/打招呼合一，⑤=监测与发简历），
+// 状态条仍沿用后端累计漏斗 5 项（采集 → 初筛 → AI评分 → 人工确认 → 发送）
+const PIPELINE_FUNNEL: Array<{ label: string; key: string }> = [
+  { label: '采集', key: '采集总数' },
+  { label: '初筛', key: '初筛通过' },
+  { label: 'AI评分', key: 'AI评分' },
+  { label: '确认', key: '人工确认' },
+  { label: '发送', key: '发送' },
+]
+
+function PipelineStatusBar({ funnel }: { funnel: FunnelData }) {
+  const head = funnel['采集总数'] || 0
+  return (
+    <div className="rounded-2xl border border-card-border bg-[#FFFCFA] p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-black tracking-[0.18em] text-primary">PIPELINE 管道状态</div>
+        <div className="text-[10px] font-bold text-muted">采集 → 评分 → 确认 → 发送（累计漏斗）</div>
+      </div>
+      <div className="flex gap-1.5">
+        {PIPELINE_FUNNEL.map((stage, index) => {
+          const value = funnel[stage.key] || 0
+          const ratio = head > 0 ? Math.min(1, value / head) : 0
+          const intensity = 0.10 + ratio * 0.85
+          const dark = intensity > 0.55
+          return (
+            <div
+              key={stage.key}
+              className="min-w-0 flex-1 overflow-hidden rounded-xl border border-card-border/60 px-2.5 py-2"
+              style={{ backgroundColor: `rgba(251, 101, 17, ${Math.min(0.95, intensity).toFixed(3)})` }}
+            >
+              <div className={`truncate text-[10px] font-bold ${dark ? 'text-white/80' : 'text-primary'}`}>{stage.label}</div>
+              <div className={`mt-0.5 text-lg font-black tabular-nums ${dark ? 'text-white' : 'text-foreground'}`}>{value}</div>
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/30">
+                <div
+                  className="h-full rounded-full bg-white/90"
+                  style={{ width: `${(ratio * 100).toFixed(1)}%` }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 const statItems = [
   { key: '采集总数', todayLabel: '今日新增岗位', totalLabel: '累计采集岗位' },
@@ -199,6 +263,61 @@ async function parsePreflightResponse(res: Response) {
     })))
   }
   return { ok: Boolean(res.ok && data.ok), messages, checks }
+}
+
+function PipelineSectionHeader({
+  seq,
+  title,
+  description,
+  icon,
+  right,
+}: {
+  seq: string
+  title: string
+  description: string
+  icon?: ReactNode
+  right?: ReactNode
+}) {
+  return (
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl bg-primary text-white">
+          <span className="text-[9px] font-black leading-none">{seq}</span>
+          {icon && <span className="flex">{icon}</span>}
+        </span>
+        <div>
+          <h3 className="text-lg font-black">{title}</h3>
+          <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
+        </div>
+      </div>
+      {right}
+    </div>
+  )
+}
+
+function PipelineJobCard({
+  job,
+  badge,
+  badgeClass = 'bg-[#FFF0E5] text-primary',
+  children,
+}: {
+  job: Job
+  badge: string
+  badgeClass?: string
+  children: ReactNode
+}) {
+  return (
+    <div className="rounded-2xl border border-card-border bg-[#FFFCFA] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="font-black">{job.company}｜{job.title}</div>
+          <div className="mt-1 text-xs text-muted">{jobSubtitle(job)}</div>
+        </div>
+        <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-black ${badgeClass}`}>{badge}</span>
+      </div>
+      {children}
+    </div>
+  )
 }
 
 function PreflightPanel({
@@ -288,6 +407,9 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
   const [confirmedDeliveryIds, setConfirmedDeliveryIds] = useState<Set<string>>(new Set())
   const [todayFilters, setTodayFilters] = useState<JobFilters>({ ...EMPTY_JOB_FILTERS })
   const [statsScope, setStatsScope] = useState<StatsScope>('today')
+  const [editGreetingJob, setEditGreetingJob] = useState<Job | null>(null)
+  const [editGreetingText, setEditGreetingText] = useState('')
+  const [editGreetingSaving, setEditGreetingSaving] = useState(false)
 
   const todayJobs = useMemo(
     () => workbench.pending_confirmation.filter(job => !confirmedDeliveryIds.has(job.id)),
@@ -312,6 +434,10 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
     })
   }, [visibleJobIds])
   const pendingGreetingJobs = workbench.pending_greetings
+  const resumePendingJobs = [...(workbench.resume_pending ?? []), ...(workbench.needs_resume ?? [])]
+  const resumeItems = resumePendingJobs.filter((job, index, arr) => arr.findIndex(candidate => candidate.id === job.id) === index)
+  const totalConfirmCount = todayJobs.length + pendingGreetingJobs.length
+  const pendingScoreCount = Math.max(0, (workbench.funnel['采集总数'] || 0) - (workbench.funnel['初筛通过'] || 0) - (workbench.funnel['AI评分'] || 0))
   const activeTask = workbench.task
   const visibleTask = activeTask || workbench.last_task
   const visibleTaskError = visibleTask?.error ? taskErrorFeedback(visibleTask.error) : null
@@ -464,6 +590,47 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
     }
   }
 
+  const openGreetingEditor = (job: Job) => {
+    setEditGreetingJob(job)
+    setEditGreetingText(job.greeting || '')
+  }
+
+  const closeGreetingEditor = () => {
+    if (editGreetingSaving) return
+    setEditGreetingJob(null)
+    setEditGreetingText('')
+  }
+
+  const saveGreeting = async () => {
+    if (!editGreetingJob) return
+    const text = editGreetingText.trim()
+    if (!text) {
+      setNotice('招呼语不能为空')
+      return
+    }
+    try {
+      setEditGreetingSaving(true)
+      const url = '/api/jobs/' + editGreetingJob.id + '/greeting'
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ greeting: text }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || '保存失败')
+      }
+      setNotice('招呼语已更新，发送时将使用修改后的内容。')
+      setEditGreetingJob(null)
+      setEditGreetingText('')
+      await refresh()
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setEditGreetingSaving(false)
+    }
+  }
+
   const openJobDetail = async (job: Job) => {
     try {
       const res = await fetch(`/api/jobs/${job.id}`)
@@ -478,17 +645,18 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
     window.open(`/api/jobs/${job.id}/resume/download`, '_blank')
   }
 
-  const markResumeSent = async (job: Job) => {
+  const confirmSendResume = async (job: Job) => {
+    if (!window.confirm(`确认向 ${job.company}｜${job.title} 发送定制简历吗？确认后系统会代为发送，并从待确认列表移除。`)) return
     try {
-      const res = await fetch(`/api/jobs/${job.id}/mark-resume-sent`, { method: 'POST' })
+      const res = await fetch(`/api/jobs/${job.id}/confirm-send-resume`, { method: 'POST' })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || '标记失败')
+        throw new Error(data.error || '确认发送失败')
       }
       await refresh()
-      setNotice(`已标记 ${job.company}｜${job.title} 的定制简历已发送。`)
+      setNotice(`已确认发送 ${job.company}｜${job.title} 的定制简历。`)
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : '标记失败')
+      setNotice(err instanceof Error ? err.message : '确认发送失败')
     }
   }
 
@@ -531,47 +699,14 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         </div>
 
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {modes.map(item => {
-            const isActive = activeTask?.mode === item.mode
-            const disabled = Boolean(activeTask && !isActive)
-            return (
-              <button
-                key={item.mode}
-                onClick={() => handleModeClick(item.mode)}
-                aria-disabled={disabled}
-                className={`min-h-[126px] rounded-3xl p-5 text-left transition ${
-                  isActive
-                    ? 'border-2 border-primary bg-primary text-white shadow-xl shadow-primary/20'
-                    : disabled
-                      ? 'cursor-not-allowed border border-card-border bg-white text-muted opacity-45'
-                      : 'border border-card-border bg-[#FFFCFA] text-foreground hover:border-primary/60 hover:shadow-md'
-                }`}
-              >
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="text-lg font-black">
-                    {modePending === item.mode
-                      ? isActive ? '任务停止中' : '任务启动中'
-                      : isActive ? `${item.title}中` : item.title}
-                  </div>
-                  {isActive ? <Square className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5" />}
-                </div>
-                <p className={`text-xs leading-6 ${isActive ? 'text-white/85' : 'text-muted'}`}>{item.description}</p>
-              </button>
-            )
-          })}
-        </div>
-        {notice && <div className="mt-3 rounded-2xl bg-[#FFF0E5] px-4 py-3 text-sm text-primary">{notice}</div>}
-        {preflightChecks.some(check => check.status !== 'pass') && (
-          <PreflightPanel checks={preflightChecks} checking={Boolean(modePending)} onRetry={retryPreflight} />
-        )}
-        {error && <div className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-danger">{error}</div>}
+        <PipelineStatusBar funnel={workbench.funnel} />
+
         {visibleTask && (
           <div className="mt-3 rounded-3xl border border-card-border bg-[#FFFCFA] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-black">任务运行状态</div>
-                <p className="mt-1 text-xs leading-5 text-muted">如果点击后浏览器没有反应，请先打开 BOSS 直聘并确认已登录；常见失败原因是 BOSS 未登录或 Chrome 调试连接不可用。</p>
+                <p className="mt-1 text-xs leading-5 text-muted">实时进度与错误信息。若浏览器无反应，请确认已打开 BOSS 直聘并登录、Chrome 调试连接可用。</p>
               </div>
               <span className="rounded-full bg-[#FFF0E5] px-3 py-1 text-xs font-black text-primary">
                 {visibleTask.label}
@@ -658,117 +793,108 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         </div>
       </section>
 
+      {/* ① 采集 —— 入口卡片组（全流程常驻 / 独立采集 / 独立评分 / 独立监测） */}
       <section className="rounded-3xl border border-card-border bg-white p-5">
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-black">优先处理：HR 要简历 / 定制简历下载</h3>
-            <p className="mt-1 text-xs text-muted">首页只展示需要你手动下载并自行发给 HR 的定制简历事项。</p>
-          </div>
-          <Button variant="secondary" size="sm">查看全部简历事项</Button>
+        <PipelineSectionHeader
+          seq="①"
+          title="采集"
+          description="按关键词和城市持续采集岗位，写入待评分池；可选全流程常驻或只采集。"
+        />
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+          {modes.map(item => {
+            const isActive = activeTask?.mode === item.mode
+            const disabled = Boolean(activeTask && !isActive)
+            return (
+              <button
+                key={item.mode}
+                onClick={() => handleModeClick(item.mode)}
+                aria-disabled={disabled}
+                className={`min-h-[126px] rounded-3xl p-5 text-left transition ${
+                  isActive
+                    ? 'border-2 border-primary bg-primary text-white shadow-xl shadow-primary/20'
+                    : disabled
+                      ? 'cursor-not-allowed border border-card-border bg-white text-muted opacity-45'
+                      : 'border border-card-border bg-[#FFFCFA] text-foreground hover:border-primary/60 hover:shadow-md'
+                }`}
+              >
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-[#FFF0E5] text-primary'
+                    }`}>
+                      {item.stage}
+                    </span>
+                    <div className="text-base font-black leading-6">
+                      {modePending === item.mode
+                        ? isActive ? '任务停止中' : '任务启动中'
+                        : isActive ? `${item.title}中` : item.title}
+                    </div>
+                  </div>
+                  {isActive ? <Square className="h-5 w-5 shrink-0 fill-current" /> : <Play className="h-5 w-5 shrink-0" />}
+                </div>
+                <p className={`text-xs leading-6 ${isActive ? 'text-white/85' : 'text-muted'}`}>{item.description}</p>
+              </button>
+            )
+          })}
         </div>
-        {workbench.needs_resume.length ? (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {workbench.needs_resume.slice(0, 4).map(job => (
-              <div key={job.id} className="rounded-2xl border border-card-border bg-[#FFFCFA] p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="font-black">{job.company}｜{job.title}</div>
-                  <span className="rounded-full bg-[#FFF0E5] px-2 py-1 text-[11px] font-black text-primary">待发简历</span>
-                </div>
-                <p className="mt-2 text-sm leading-6 text-muted">HR 已请求简历，系统已准备定制化简历下载入口。</p>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={() => downloadResume(job)}><Download className="mr-2 h-4 w-4" />下载定制简历</Button>
-                  <Button variant="secondary" size="sm" onClick={() => markResumeSent(job)}>标记已发送</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-card-border bg-[#FFFCFA] p-5 text-sm text-muted">当前没有 HR 要简历事项。</div>
+        {notice && <div className="mt-3 rounded-2xl bg-[#FFF0E5] px-4 py-3 text-sm text-primary">{notice}</div>}
+        {preflightChecks.some(check => check.status !== 'pass') && (
+          <PreflightPanel checks={preflightChecks} checking={Boolean(modePending)} onRetry={retryPreflight} />
         )}
+        {error && <div className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-danger">{error}</div>}
       </section>
 
-      {workbench.send_errors.length > 0 && (
-        <section className="rounded-3xl border border-red-100 bg-red-50 p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h3 className="text-lg font-black text-danger">发送失败待处理</h3>
-              <p className="mt-1 text-xs text-danger/80">这些岗位已生成招呼语，但没有成功发送。你可以重试，或放弃已失效岗位。</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => confirmDeliver(workbench.send_errors.map(job => job.id))}>重新发送全部 {workbench.send_errors.length} 个</Button>
-              <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(workbench.send_errors.map(job => job.id))}>放弃全部</Button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {workbench.send_errors.map(job => (
-              <div key={job.id} className="rounded-2xl border border-red-100 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-black">{job.company}｜{job.title}</div>
-                    <div className="mt-1 text-xs text-danger">最近失败原因：{job.last_error || '发送失败，等待重试'}</div>
-                  </div>
-                  <span className="rounded-full bg-red-50 px-2 py-1 text-[11px] font-black text-danger">发送失败</span>
-                </div>
-                <p className="mt-3 line-clamp-2 text-sm leading-6 text-muted">{job.greeting || '招呼语已生成，等待重新发送。'}</p>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={() => sendReadyGreetings([job.id])}>重新发送</Button>
-                  <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs([job.id])}>放弃</Button>
-                  <Button variant="secondary" size="sm" onClick={() => openJobDetail(job)}><Eye className="mr-2 h-4 w-4" />查看详情</Button>
-                  <Button variant="secondary" size="sm" disabled={!job.url} onClick={() => window.open(job.url, '_blank', 'noopener,noreferrer')}><ExternalLink className="mr-2 h-4 w-4" />跳转岗位链接</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {pendingGreetingJobs.length > 0 && (
-        <section className="rounded-3xl border border-primary/20 bg-[#FFF0E5] p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h3 className="text-lg font-black">待发送招呼语</h3>
-              <p className="mt-1 text-xs text-muted">这些岗位已确认并生成招呼语，点击后会直接进入发送流程。</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => sendReadyGreetings(pendingGreetingJobs.map(job => job.id))}>发送全部 {pendingGreetingJobs.length} 个</Button>
-              <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(pendingGreetingJobs.map(job => job.id))}>放弃全部</Button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {pendingGreetingJobs.map(job => (
-              <div key={job.id} className="rounded-2xl border border-primary/20 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-black">{job.company}｜{job.title}</div>
-                    <div className="mt-1 text-xs text-primary">已生成招呼语，等待发送</div>
-                  </div>
-                  <span className="rounded-full bg-[#FFF0E5] px-2 py-1 text-[11px] font-black text-primary">待发送</span>
-                </div>
-                <p className="mt-3 line-clamp-2 text-sm leading-6 text-muted">{job.greeting || '招呼语已生成，等待发送。'}</p>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={() => sendReadyGreetings([job.id])}>发送招呼语</Button>
-                  <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs([job.id])}>放弃</Button>
-                  <Button variant="secondary" size="sm" onClick={() => openJobDetail(job)}><Eye className="mr-2 h-4 w-4" />查看详情</Button>
-                  <Button variant="secondary" size="sm" disabled={!job.url} onClick={() => window.open(job.url, '_blank', 'noopener,noreferrer')}><ExternalLink className="mr-2 h-4 w-4" />跳转岗位链接</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
+      {/* ② 评分 —— 待评分池（自动进行，通过者自动生成招呼语） */}
       <section className="rounded-3xl border border-card-border bg-white p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-black">今日待确认</h3>
-            <p className="mt-1 text-xs text-muted">展示需要你人工确认是否推进投递的岗位，支持全选、部分选择、一键投递。</p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setSelected(filteredTodayJobs.map(job => job.id))}>全选</Button>
-            <Button variant="secondary" size="sm" onClick={() => setSelected([])}>清空</Button>
-            <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(actionableSelected)}>放弃已选 {actionableSelected.length} 个</Button>
-            <Button size="sm" onClick={() => confirmDeliver(actionableSelected)}>一键投递已选 {actionableSelected.length} 个</Button>
-          </div>
+        <PipelineSectionHeader
+          seq="②"
+          title="评分"
+          description="评分自动进行，通过者自动生成招呼语。"
+          icon={<Star className="h-3.5 w-3.5" />}
+          right={
+            <span className="rounded-2xl border border-primary/20 bg-[#FFF0E5] px-4 py-2 text-sm font-black text-primary">
+              待评分池 {pendingScoreCount} 个
+            </span>
+          }
+        />
+        <div className="rounded-2xl border border-card-border bg-[#FFFCFA] p-4 text-sm leading-6 text-muted">
+          AI 按岗位库 FIFO 依次评分子，通过者自动生成招呼语并进入“③ 确认投递”。
+          当前待评分池数字 = 采集总数 − 初筛通过 − AI评分（{workbench.funnel['采集总数'] || 0} − {workbench.funnel['初筛通过'] || 0} − {workbench.funnel['AI评分'] || 0}）。
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {([
+            { label: '采集总数', value: workbench.funnel['采集总数'] || 0 },
+            { label: '初筛通过', value: workbench.funnel['初筛通过'] || 0 },
+            { label: 'AI 评分', value: workbench.funnel['AI评分'] || 0 },
+          ]).map(item => (
+            <div key={item.label} className="rounded-2xl border border-card-border bg-white px-4 py-3">
+              <div className="text-[10px] font-bold text-muted">{item.label}</div>
+              <div className="mt-0.5 text-xl font-black tabular-nums">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ③ 确认投递（打招呼合一）—— 今日待确认 + 待发送招呼语 */}
+      <section className="rounded-3xl border border-primary/20 bg-[#FFF0E5] p-5">
+        <PipelineSectionHeader
+          seq="③"
+          title="确认投递（打招呼合一）"
+          description="确认即发送招呼语（打招呼），不再分两步：勾选后一键投递，已生成招呼语的岗位也会一并发出。"
+          icon={<Send className="h-3.5 w-3.5" />}
+          right={
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setSelected(filteredTodayJobs.map(job => job.id))}>全选</Button>
+              <Button variant="secondary" size="sm" onClick={() => setSelected([])}>清空</Button>
+              <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(actionableSelected)}>放弃已选 {actionableSelected.length} 个</Button>
+              <Button size="sm" onClick={() => confirmDeliver(actionableSelected)}>一键投递已选 {actionableSelected.length} 个</Button>
+            </div>
+          }
+        />
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-primary">待你确认 {todayJobs.length} 个</span>
+          <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-primary">已生成可发 {pendingGreetingJobs.length} 个</span>
+          <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black text-primary">合计 {totalConfirmCount} 个</span>
         </div>
         <JobFilterBar
           filters={todayFilters}
@@ -799,9 +925,143 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         ) : (
           <div className="rounded-2xl border border-dashed border-card-border bg-[#FFFCFA] p-5 text-sm text-muted">今天暂时没有待确认岗位。</div>
         )}
+        {pendingGreetingJobs.length > 0 && (
+          <>
+            <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <MessageCircle className="h-4 w-4 text-primary" />
+                <div className="text-sm font-black">已生成招呼语（可发）</div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => sendReadyGreetings(pendingGreetingJobs.map(job => job.id))}>发送全部 {pendingGreetingJobs.length} 个</Button>
+                <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(pendingGreetingJobs.map(job => job.id))}>放弃全部</Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {pendingGreetingJobs.map(job => (
+                <div key={job.id} className="rounded-2xl border border-primary/20 bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-black">{job.company}｜{job.title}</div>
+                      <div className="mt-1 text-xs text-primary">{job.score ? `匹配 ${job.score} · ` : ''}已生成招呼语，等待发送</div>
+                    </div>
+                    <span className="rounded-full bg-[#FFF0E5] px-2 py-1 text-[11px] font-black text-primary">待发送</span>
+                  </div>
+                  <p className="mt-3 line-clamp-2 text-sm leading-6 text-muted">{job.greeting || '招呼语已生成，等待发送。'}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => sendReadyGreetings([job.id])}>发送招呼语</Button>
+                    <Button size="sm" variant="secondary" onClick={() => openGreetingEditor(job)}><Pencil className="mr-2 h-4 w-4" />编辑招呼语</Button>
+                    <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs([job.id])}>放弃</Button>
+                    <Button variant="secondary" size="sm" onClick={() => openJobDetail(job)}><Eye className="mr-2 h-4 w-4" />查看详情</Button>
+                    <Button variant="secondary" size="sm" disabled={!job.url} onClick={() => window.open(job.url, '_blank', 'noopener,noreferrer')}><ExternalLink className="mr-2 h-4 w-4" />跳转岗位链接</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* ④ 发送 —— 发送失败重试 */}
+      {workbench.send_errors.length > 0 && (
+        <section className="rounded-3xl border border-red-100 bg-red-50 p-5">
+          <PipelineSectionHeader
+            seq="④"
+            title="发送"
+            description="招呼语发送失败待处理。你可以重试，或放弃已失效岗位。"
+            right={
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => confirmDeliver(workbench.send_errors.map(job => job.id))}>重新发送全部 {workbench.send_errors.length} 个</Button>
+                <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(workbench.send_errors.map(job => job.id))}>放弃全部</Button>
+              </div>
+            }
+          />
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {workbench.send_errors.map(job => (
+              <div key={job.id} className="rounded-2xl border border-red-100 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-black">{job.company}｜{job.title}</div>
+                    <div className="mt-1 text-xs text-danger">最近失败原因：{job.last_error || '发送失败，等待重试'}</div>
+                  </div>
+                  <span className="rounded-full bg-red-50 px-2 py-1 text-[11px] font-black text-danger">发送失败</span>
+                </div>
+                <p className="mt-3 line-clamp-2 text-sm leading-6 text-muted">{job.greeting || '招呼语已生成，等待重新发送。'}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => sendReadyGreetings([job.id])}>重新发送</Button>
+                  <Button size="sm" variant="secondary" onClick={() => openGreetingEditor(job)}><Pencil className="mr-2 h-4 w-4" />编辑招呼语</Button>
+                  <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs([job.id])}>放弃</Button>
+                  <Button variant="secondary" size="sm" onClick={() => openJobDetail(job)}><Eye className="mr-2 h-4 w-4" />查看详情</Button>
+                  <Button variant="secondary" size="sm" disabled={!job.url} onClick={() => window.open(job.url, '_blank', 'noopener,noreferrer')}><ExternalLink className="mr-2 h-4 w-4" />跳转岗位链接</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ⑤ 监测与发简历 —— HR 要简历时自动生成定制 PDF，等你确认后发送 */}
+      <section className="rounded-3xl border border-card-border bg-white p-5">
+        <PipelineSectionHeader
+          seq="⑤"
+          title="监测与发简历"
+          description="监测发现 HR 要简历时自动生成定制 PDF，等你确认后发送。"
+          icon={<FileText className="h-3.5 w-3.5" />}
+          right={
+            <span className="rounded-2xl border border-primary/20 bg-[#FFF0E5] px-4 py-2 text-sm font-black text-primary">
+              待确认发送 {resumeItems.length} 个
+            </span>
+          }
+        />
+        {resumeItems.length ? (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {resumeItems.map(job => {
+              const isPending = (workbench.resume_pending ?? []).some(item => item.id === job.id)
+              return (
+                <PipelineJobCard
+                  key={job.id}
+                  job={job}
+                  badge={isPending ? '待确认发送' : '待发简历'}
+                  badgeClass={isPending ? 'bg-[#FFF0E5] text-primary' : 'bg-white text-primary'}
+                >
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    {isPending
+                      ? '定制简历已生成，等待你确认发送。'
+                      : 'HR 已请求简历，系统已准备定制化简历下载入口。'}
+                  </p>
+                  {job.resume_path && (
+                    <div className="mt-3 flex items-center gap-2 rounded-xl border border-card-border bg-white px-3 py-2">
+                      <FileText className="h-4 w-4 shrink-0 text-primary" />
+                      <span className="truncate text-xs font-bold text-muted" title={job.resume_path}>
+                        {job.resume_path.split(/[\\/]/).pop() || job.resume_path}
+                      </span>
+                    </div>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => confirmSendResume(job)}><Send className="mr-2 h-4 w-4" />确认发送</Button>
+                    <Button variant="secondary" size="sm" onClick={() => downloadResume(job)}><Download className="mr-2 h-4 w-4" />下载 PDF</Button>
+                    <Button variant="secondary" size="sm" onClick={() => openJobDetail(job)}><Eye className="mr-2 h-4 w-4" />查看详情</Button>
+                  </div>
+                </PipelineJobCard>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-card-border bg-[#FFFCFA] p-5 text-sm text-muted">当前没有待确认发送的定制简历。</div>
+        )}
       </section>
 
       {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} />}
+      {editGreetingJob && (
+        <GreetingEditorModal
+          job={editGreetingJob}
+          text={editGreetingText}
+          saving={editGreetingSaving}
+          onChange={setEditGreetingText}
+          onSave={saveGreeting}
+          onClose={closeGreetingEditor}
+        />
+      )}
     </div>
   )
 }
@@ -862,6 +1122,53 @@ function JobDetailModal({ job, onClose }: { job: Job; onClose: () => void }) {
   )
 }
 
+
+function GreetingEditorModal({
+  job,
+  text,
+  saving,
+  onChange,
+  onSave,
+  onClose,
+}: {
+  job: Job
+  text: string
+  saving: boolean
+  onChange: (value: string) => void
+  onSave: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
+      <div className="max-h-[86vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-card-border bg-white p-6 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <div className="text-xs font-black tracking-[0.18em] text-primary">编辑招呼语</div>
+            <h3 className="mt-1 text-xl font-black">{job.company}｜{job.title}</h3>
+            <p className="mt-1 text-sm text-muted">发送前可自由修改，保存后发送时使用新内容。</p>
+          </div>
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>关闭</Button>
+        </div>
+        <textarea
+          value={text}
+          onChange={e => onChange(e.target.value)}
+          placeholder="输入发给 HR 的招呼语…"
+          rows={8}
+          className="w-full resize-y rounded-2xl border border-card-border bg-[#FFFCFA] p-4 text-sm leading-6 outline-none focus:border-primary/50"
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="text-xs text-muted">{text.length} 字（建议 50–150 字）</span>
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>取消</Button>
+            <Button size="sm" onClick={onSave} disabled={saving || !text.trim()}>
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-card-border bg-[#FFFCFA] p-4">

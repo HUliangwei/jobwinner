@@ -8,9 +8,9 @@ from typing import Any
 
 DB_PATH = Path("./data/bosshunter.db")
 MAX_JOB_IDS = 1000
-DELETION_PROTECTED_STATUSES = {"sent", "replied", "resume_sent", "needs_resume", "follow_up_sent"}
+DELETION_PROTECTED_STATUSES = {"sent", "replied", "resume_sent", "needs_resume", "resume_pending", "follow_up_sent"}
 DELETION_PROTECTED_HISTORY_ACTIONS = {
-    "sent", "replied", "resume_sent", "needs_resume", "follow_up_sent", "reply_pending", "auto_replied",
+    "sent", "replied", "resume_sent", "needs_resume", "resume_pending", "follow_up_sent", "reply_pending", "auto_replied",
 }
 
 
@@ -87,6 +87,9 @@ def _init_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
     _migrate_v1_1(conn)
     _migrate_v1_2(conn)
+    _migrate_v1_3(conn)
+    _migrate_v1_4(conn)
+    _migrate_v1_5(conn)
     _init_scoring_runs(conn)
 
 
@@ -365,6 +368,18 @@ def get_jobs_pending_confirmation(conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def get_jobs_needing_greeting(conn: sqlite3.Connection) -> list[dict]:
+    """Get jobs that passed scoring (ready/approved) but have no greeting yet."""
+    rows = conn.execute("""
+        SELECT * FROM jobs
+        WHERE status IN ('ready', 'approved')
+          AND deleted_at IS NULL
+          AND (greeting IS NULL OR TRIM(greeting) = '')
+        ORDER BY score DESC
+    """).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_jobs_ready_to_send(conn: sqlite3.Connection) -> list[dict]:
     """Get jobs that have generated greetings and are ready to send."""
     rows = conn.execute("""
@@ -427,6 +442,147 @@ def _migrate_v1_2(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN deleted_reason TEXT NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_deleted_at ON jobs(deleted_at)")
     conn.commit()
+
+
+def _migrate_v1_3(conn: sqlite3.Connection) -> None:
+    """Add stage (recruiting phase) column: 筛选/笔试/面试/谈薪/Offer/已拒绝 etc."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "stage" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN stage TEXT DEFAULT NULL")
+    if "stage_updated_at" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN stage_updated_at TIMESTAMP NULL")
+    conn.commit()
+
+
+def _migrate_v1_4(conn: sqlite3.Connection) -> None:
+    """Add source column: 'boss' (BOSS直聘, default) or 'portal' (官网投递)."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "source" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN source TEXT DEFAULT 'boss'")
+    if "priority" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN priority TEXT DEFAULT NULL")
+    if "applied_date" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN applied_date TEXT DEFAULT NULL")
+    conn.commit()
+
+
+def _migrate_v1_5(conn: sqlite3.Connection) -> None:
+    """Add stage_source column: 'auto'(官网巡检) / 'manual'(手动) / 'unknown'(查不到)."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "stage_source" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN stage_source TEXT DEFAULT 'manual'")
+    conn.commit()
+
+
+def add_portal_application(
+    conn: sqlite3.Connection,
+    *,
+    company: str,
+    title: str,
+    url: str = "",
+    city: str = "",
+    priority: str = "",
+    stage: str = "",
+    notes: str = "",
+    applied_date: str = "",
+) -> str:
+    """Add a company-portal job application (官网投递). Returns the new job id."""
+    import hashlib
+
+    job_url = url or f"portal://{company}/{title}"
+    job_id = hashlib.md5(job_url.encode("utf-8")).hexdigest()[:16]
+    # 有初始 stage → 手动标注(manual)；无 stage → 不明确(unknown，等待官网巡检)
+    initial_source = "manual" if (stage or "").strip() else "unknown"
+    # Reuse the same id scheme as scraped jobs for consistency.
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO jobs
+            (id, title, company, url, city, source, priority, stage, stage_source, status, jd, applied_date, created_at, updated_at, stage_updated_at)
+        VALUES (?, ?, ?, ?, ?, 'portal', ?, ?, ?, 'sent', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """,
+        (job_id, title, company, job_url, city, priority or None, stage or None, initial_source, notes or "", applied_date or None),
+    )
+    # Record the application as 'sent' so it shows in the progress board.
+    conn.execute(
+        "INSERT INTO history (job_id, action, detail, created_at) VALUES (?, 'sent', ?, CURRENT_TIMESTAMP)",
+        (job_id, f"官网投递{'（' + applied_date + '）' if applied_date else ''}: {company} {title}" + (f" | {notes}" if notes else "")),
+    )
+    conn.commit()
+    return job_id
+
+
+def set_job_stage(
+    conn: sqlite3.Connection,
+    job_id: str,
+    stage: str,
+    note: str | None = None,
+    stage_source: str | None = None,
+) -> bool:
+    """Update a job's recruiting stage and record it in history.
+
+    stage_source: 阶段来源 'auto'(官网巡检) / 'manual'(手动标注) / 'unknown'(查不到)，None=不动。
+    Empty stage clears the stage. Returns True if the job exists and was updated.
+    """
+    row = conn.execute(
+        "SELECT id, stage FROM jobs WHERE id = ? AND deleted_at IS NULL", (job_id,)
+    ).fetchone()
+    if not row:
+        return False
+    normalized = stage or None
+    if stage_source is not None:
+        conn.execute(
+            "UPDATE jobs SET stage = ?, stage_source = ?, stage_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (normalized, stage_source, job_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE jobs SET stage = ?, stage_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (normalized, job_id),
+        )
+    if normalized:
+        src_tag = {"auto": "（官网同步）", "manual": "（手动标注）", "unknown": "（官网查不到）"}.get(stage_source or "", "")
+        detail = f"阶段更新: {normalized}{src_tag}" + (f" | {note}" if note else "")
+    else:
+        detail = "阶段重置"
+    conn.execute(
+        "INSERT INTO history (job_id, action, detail, created_at) VALUES (?, 'stage', ?, CURRENT_TIMESTAMP)",
+        (job_id, detail),
+    )
+    conn.commit()
+    return True
+
+
+def get_application_progress(conn: sqlite3.Connection) -> list[dict]:
+    """Return jobs with real recruiting progress (sent or further), with stage + timeline.
+
+    Each row: job fields + stage + first_sent_at + last_updated + milestones + timeline.
+    """
+    rows = conn.execute(
+        """
+        SELECT j.*,
+               (SELECT MIN(h.created_at) FROM history h WHERE h.job_id = j.id AND h.action = 'sent') AS first_sent_at,
+               (SELECT MAX(h.created_at) FROM history h WHERE h.job_id = j.id AND h.action = 'replied') AS last_reply_at,
+               (SELECT MAX(h.created_at) FROM history h WHERE h.job_id = j.id AND h.action = 'follow_up_sent') AS last_follow_up_at
+        FROM jobs j
+        WHERE j.deleted_at IS NULL
+          AND (j.status IN ('sent', 'replied', 'resume_sent', 'needs_resume', 'follow_up_sent', 'rejected', 'error')
+               OR EXISTS (SELECT 1 FROM history h WHERE h.job_id = j.id AND h.action = 'sent'))
+        ORDER BY COALESCE(j.stage_updated_at, j.updated_at) DESC
+        """
+    ).fetchall()
+    result = []
+    for row in rows:
+        job = dict(row)
+        # timeline: all history for this job, ascending
+        timeline = []
+        for h in conn.execute(
+            "SELECT action, detail, created_at FROM history WHERE job_id = ? ORDER BY created_at ASC",
+            (job["id"],),
+        ).fetchall():
+            timeline.append(dict(h))
+        job["timeline"] = timeline
+        result.append(job)
+    return result
 
 
 def _init_scoring_runs(conn: sqlite3.Connection) -> None:
@@ -643,5 +799,13 @@ def get_jobs_needing_resume(conn: sqlite3.Connection) -> list[dict]:
     """Get jobs waiting for manual resume send (tailored PDF generated, not yet sent)."""
     rows = conn.execute(
         "SELECT * FROM jobs WHERE status = 'needs_resume' AND deleted_at IS NULL ORDER BY updated_at DESC"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_jobs_resume_pending(conn: sqlite3.Connection) -> list[dict]:
+    """Get jobs with tailored PDF generated, waiting for user confirmation to send."""
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE status = 'resume_pending' AND deleted_at IS NULL ORDER BY updated_at DESC"
     ).fetchall()
     return [dict(row) for row in rows]

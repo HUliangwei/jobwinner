@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -19,7 +18,7 @@ from bosshunter.ai.credentials import (
 from bosshunter.browser.diagnostics import run_browser_diagnostics
 
 
-VALID_MODES = {"full", "collect", "rescore", "monitor"}
+VALID_MODES = {"full", "collect", "rescore", "score", "monitor"}
 
 
 def collect_preflight_checks(mode: str, config: dict) -> list[dict[str, str]]:
@@ -29,7 +28,7 @@ def collect_preflight_checks(mode: str, config: dict) -> list[dict[str, str]]:
 		return checks
 
 	with ThreadPoolExecutor(max_workers=2) as executor:
-		ai_future = executor.submit(check_ai_connection, deepcopy(config), mode in {"full", "collect", "rescore"})
+		ai_future = executor.submit(check_ai_connection, deepcopy(config), mode in {"full", "collect", "rescore", "score"})
 		browser_future = executor.submit(check_browser_connection, deepcopy(config))
 		for future, fallback in (
 			(ai_future, _check("ai_connection", "AI 接口连接", "error", "AI 接口检测失败", "请检查 AI 设置后重试。", "config")),
@@ -339,8 +338,9 @@ def _configuration_checks(mode: str, config: dict) -> list[dict[str, str]]:
 		)
 		return checks
 
-	resume_path = config.get("profile", {}).get("resume_path", "")
-	if not resume_path or not Path(str(resume_path)).exists():
+	from bosshunter.ai.resume_picker import resume_paths
+	strategy = resume_paths(config)
+	if not strategy or not any(p.exists() for p in strategy):
 		checks.append(
 			_check(
 				"resume",
@@ -352,7 +352,8 @@ def _configuration_checks(mode: str, config: dict) -> list[dict[str, str]]:
 			)
 		)
 	else:
-		checks.append(_check("resume", "简历文件", "pass", "简历文件已就绪", Path(str(resume_path)).name))
+		first_name = next((p.name for p in strategy if p.exists()), strategy[0].name)
+		checks.append(_check("resume", "简历文件", "pass", "简历文件已就绪", first_name))
 
 	if mode in {"full", "collect"}:
 		keywords = config.get("search", {}).get("keywords") or []

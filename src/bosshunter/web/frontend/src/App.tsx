@@ -3,6 +3,7 @@ import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
 import DashboardPage from './pages/DashboardPage'
 import ConfigPage from './pages/ConfigPage'
+import ProgressPage from './pages/ProgressPage'
 
 function JobsPage() {
   return <DashboardPage view="jobs" />
@@ -24,6 +25,7 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/jobs" element={<JobsPage />} />
               <Route path="/monitor" element={<MonitorPage />} />
+              <Route path="/progress" element={<ProgressPage />} />
               <Route path="/config" element={<ConfigPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

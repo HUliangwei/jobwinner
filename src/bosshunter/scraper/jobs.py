@@ -5,6 +5,7 @@ import random
 import re
 import time
 import hashlib
+from typing import Callable
 from urllib.parse import quote
 
 from rich.console import Console
@@ -151,12 +152,16 @@ def scrape_jobs(
     limit: int | None = None,
     *,
     collected_job_ids: list[str] | None = None,
+    on_new_job: Callable | None = None,
 ) -> int:
     """Scrape jobs from BOSS直聘 and store in database.
 
     Supports multi-keyword × multi-city combinations with pagination.
     When limit is None, collection is bounded only by city × keyword × max_pages.
     Returns the number of new jobs added.
+
+    on_new_job: optional callback(job_id, job_record) invoked immediately after
+    a new job is inserted, enabling conveyor-belt (real-time streaming) scoring.
     """
     db = get_db()
     stop_event = get_stop_event(config)
@@ -352,6 +357,12 @@ def scrape_jobs(
                     insert_job(db, job_record)
                     if collected_job_ids is not None:
                         collected_job_ids.append(job_id)
+                    if on_new_job is not None:
+                        try:
+                            on_new_job(job_id, job_record)
+                        except Exception:
+                            # A callback failure must not abort scraping.
+                            pass
                     new_count += 1
                     keyword_new += 1
                     report_progress()

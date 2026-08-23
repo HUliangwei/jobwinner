@@ -432,10 +432,10 @@ def _generate_auto_reply(messages: list[dict], job: dict, config: dict) -> str |
     # Build conversation context
     conv_text = "\n".join([f"{'我' if m['sender'] == 'me' else 'HR'}: {m['text']}" for m in messages[-10:]])
 
-    # Read resume summary from file
-    from pathlib import Path
-    resume_path = Path(config.get("profile", {}).get("resume_path", "./resume.md"))
-    resume_summary = resume_path.read_text(encoding="utf-8")[:800] if resume_path.exists() else "（未配置简历）"
+    # Read the best-matching resume summary for this job
+    from bosshunter.ai.resume_picker import select_resume_path_for_job
+    resume_path = select_resume_path_for_job(job, config)
+    resume_summary = resume_path.read_text(encoding="utf-8")[:800] if resume_path and resume_path.exists() else "（未配置简历）"
 
     prompt = f"""你是一位求职者，正在BOSS直聘上和HR沟通。请根据对话上下文生成一条自然、礼貌的回复。
 
@@ -952,28 +952,9 @@ def _handle_conversation(job: dict, config: dict) -> str:
             return "stopped"
         if resume_path:
             console.print(f"[bold green]    ✓ 定制简历已生成: {resume_path}[/bold green]")
-            console.print(f"[bold yellow]    ⚠ 请手动发送上述简历给 {job['company']} HR[/bold yellow]")
+            console.print(f"[bold yellow]    ⚠ 已置为待确认发送：等你批准后发送给 {job['company']} HR[/bold yellow]")
         else:
             console.print("[yellow]    ! 定制简历生成失败，请手动处理[/yellow]")
-
-        # Auto-send portfolio link for normal text resume requests only.
-        # Card-triggered requests are recognition-only: generate and mark needs_resume.
-        if not resume_request_from_card:
-            portfolio_url = config.get("profile", {}).get("portfolio_url", "")
-            if not _check_if_portfolio_sent(messages, portfolio_url):
-                if _wait_or_stop(config, 2):
-                    close_tab(target_id)
-                    return "stopped"
-                link_msg = f"这是我的在线简历，方便您查看：{portfolio_url}"
-                if stop_requested(config):
-                    close_tab(target_id)
-                    return "stopped"
-                if _send_message_in_chat(target_id, link_msg):
-                    console.print("[green]    ✓ 在线简历链接已发送[/green]")
-                else:
-                    console.print("[yellow]    ! 在线简历链接发送失败[/yellow]")
-            else:
-                console.print("[dim]    在线简历链接已发过，跳过[/dim]")
 
         if not resume_path:
             if stop_requested(config):
@@ -989,30 +970,22 @@ def _handle_conversation(job: dict, config: dict) -> str:
             close_tab(target_id)
             return "failed"
 
-        # Update status to needs_resume so user knows to send the PDF
-        if resume_request_from_card:
-            history_detail = _build_reply_detail(
-                messages,
-                f"附件简历卡片请求已识别，未自动发送在线简历，定制PDF待手动发送: {resume_path}",
-                "needs_resume.v1",
-            )
-        else:
-            history_detail = _build_reply_detail(
-                messages,
-                f"在线简历已发送，定制PDF待手动发送: {resume_path}",
-                "needs_resume.v1",
-            )
-
+        # 生成 PDF 后不自动发送 —— 置为 resume_pending，等待用户在 Web 工作台确认后发送。
+        history_detail = _build_reply_detail(
+            messages,
+            f"已生成定制简历 PDF，等待确认发送: {resume_path}",
+            "resume_pending.v1",
+        )
         if stop_requested(config):
             close_tab(target_id)
             return "stopped"
         db = get_db()
-        update_job_status(db, job["id"], "needs_resume")
-        add_history(db, job["id"], "needs_resume", history_detail)
+        update_job_status(db, job["id"], "resume_pending")
+        add_history(db, job["id"], "resume_pending", history_detail)
         db.close()
 
         close_tab(target_id)
-        return "needs_resume"
+        return "resume_pending"
 
     db = get_db()
     dismissed_pending_reply = _has_dismissed_pending_reply(db, job["id"], messages)

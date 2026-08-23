@@ -522,10 +522,11 @@ def generate_tailored_resume(job_id: str, config: dict) -> Path | None:
 
     job = dict(row)
 
-    # Load base resume
-    resume_path = Path(config.get("profile", {}).get("resume_path", "./resume.md"))
-    if not resume_path.exists():
-        return fail(f"基础简历文件不存在：{resume_path}")
+    # Load the best-matching base resume for this job
+    from bosshunter.ai.resume_picker import select_resume_path_for_job
+    resume_path = select_resume_path_for_job(job, config)
+    if resume_path is None or not resume_path.exists():
+        return fail("基础简历文件不存在")
 
     try:
         resume_text = resume_path.read_text(encoding="utf-8")

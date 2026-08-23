@@ -2,14 +2,20 @@
 
 import json
 import re
-from pathlib import Path
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from bosshunter.ai.credentials import AIRequestError, call_anthropic_text
 from bosshunter.cancellation import OperationCancelled, run_cancellable
-from bosshunter.db import add_history, get_db, get_jobs_by_status, update_job_greeting, update_job_status
+from bosshunter.db import (
+    add_history,
+    get_db,
+    get_jobs_by_status,
+    get_jobs_needing_greeting,
+    update_job_greeting,
+    update_job_status,
+)
 
 console = Console()
 
@@ -61,10 +67,20 @@ REVIEW_PROMPT = """请评估以下BOSS直聘招呼语的质量。
 """
 
 
-def _get_resume_summary(config: dict) -> str:
-    """Get a brief resume summary for greeting generation."""
-    resume_path = Path(config.get("profile", {}).get("resume_path", "./resume.md"))
-    if not resume_path.exists():
+def _get_resume_summary(config: dict, job: dict | None = None) -> str:
+    """Get a brief resume summary for greeting generation.
+
+    Picks the best-matching resume for the job when one is given, otherwise
+    falls back to the default (first existing) resume.
+    """
+    from bosshunter.ai.resume_picker import resume_paths, select_resume_path_for_job
+    resume_path = select_resume_path_for_job(job, config) if job else None
+    if resume_path is None:
+        for p in resume_paths(config):
+            if p.exists():
+                resume_path = p
+                break
+    if resume_path is None or not resume_path.exists():
         return ""
     content = resume_path.read_text(encoding="utf-8")
     return content[:1500]
@@ -388,16 +404,29 @@ def _review_with_token_retry(greeting: str, job: dict, config: dict) -> dict | N
         raise
 
 
-def generate_greetings(config: dict) -> int:
-    """Generate greetings for approved jobs with optional self-review. Returns count generated."""
+def generate_greetings(config: dict, *, include_ready: bool = False) -> int:
+    """Generate greetings for jobs that still lack one.
+
+    Defaults to ``approved`` jobs (preserving the original CLI semantics). When
+    ``include_ready`` is set, also picks up ``ready`` jobs whose greeting is
+    empty — used by the scoring pipeline so that jobs passing the AI threshold
+    get their greeting generated immediately.
+    """
     db = get_db()
-    jobs = get_jobs_by_status(db, "approved")
+    jobs = (
+        get_jobs_needing_greeting(db)
+        if include_ready
+        else get_jobs_by_status(db, "approved")
+    )
     _workbench_job_ids = {str(job_id) for job_id in config.get("_workbench_job_ids", [])}
     if _workbench_job_ids:
         jobs = [job for job in jobs if str(job["id"]) in _workbench_job_ids]
 
     if not jobs:
-        console.print("[yellow]没有已确认的岗位可生成招呼语。请先运行 `bosshunter confirm`，或使用 `bosshunter run` 执行完整流程。[/yellow]")
+        hint = "没有已确认的岗位可生成招呼语。请先运行 bosshunter confirm，或使用 bosshunter run 执行完整流程。"
+        if include_ready:
+            hint = "没有待生成招呼语的岗位（评分通过即自动生成）。"
+        console.print(f"[yellow]{hint}[/yellow]")
         db.close()
         return 0
 
@@ -430,6 +459,8 @@ def generate_greetings(config: dict) -> int:
         for index, job in enumerate(jobs, start=1):
             if stop_event is not None and stop_event.is_set():
                 break
+            # Pick the resume that best matches this job for its greeting.
+            resume_summary = _get_resume_summary(config, job)
             best_greeting = None
             pause_after_current = ""
 
