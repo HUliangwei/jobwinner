@@ -111,14 +111,14 @@ def set_base_dir(base_dir: Path | str) -> None:
 	RESUME_DIR = DATA_DIR / "resumes"
 	CONFIG_PATH = BASE_DIR / "config.yaml"
 	# 一次性迁移：旧版数据文件 bosshunter.db → jobwinner.db（重命名，SQLite 无损）
-	_legacy = DATA_DIR / "jobwinner.db"
+	_legacy = DATA_DIR / "bosshunter.db"
 	_new = DATA_DIR / "jobwinner.db"
 	try:
 		if not _new.exists() and _legacy.exists():
 			_legacy.rename(_new)
 	except Exception:
 		pass  # 迁移失败不阻塞；读库时仍有回退
-	mark_orphaned_scoring_runs_paused(DATA_DIR / "jobwinner.db")
+	mark_orphaned_scoring_runs_paused(_new)
 
 
 def _get_web_db():
