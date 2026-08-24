@@ -1119,9 +1119,19 @@ def send_greetings(config: dict, force: bool = False) -> int:
             else:
                 error = result_data.get("error", "unknown")
                 send_report["failed_count"] += 1
-                update_job_status(db, job["id"], "error")
-                add_history(db, job["id"], "error", result_data.get("history_detail", f"发送失败: {error}"))
-                if result_data.get("skip_backoff"):
+                skip_backoff = bool(result_data.get("skip_backoff"))
+                # 自动重试开关（默认关闭）：非风控、非结构性错误时，把岗位
+                # 放回待发送队列（status=approved，greeting 保留），下轮发送
+                # 循环会再试一次。风控信号与结构性错误绝不自动重发（安全）。
+                auto_retry = bool(throttle_config.get("auto_retry_failed", False))
+                is_risk_signal = error in ("captcha", "rate_limit", "blocked")
+                if auto_retry and not is_risk_signal and not skip_backoff:
+                    update_job_status(db, job["id"], "approved")
+                    add_history(db, job["id"], "retry", f"发送失败({error})已自动放回待发送队列，下次运行重试")
+                else:
+                    update_job_status(db, job["id"], "error")
+                    add_history(db, job["id"], "error", result_data.get("history_detail", f"发送失败: {error}"))
+                if skip_backoff:
                     progress.update(task, advance=1)
                     continue
 

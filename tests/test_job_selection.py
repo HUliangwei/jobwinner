@@ -828,6 +828,100 @@ class JobSelectionTests(unittest.TestCase):
         self.assertEqual(status, "sent")
         self.assertEqual(outside_window_events, 0)
 
+    def test_send_failure_default_marks_error_without_auto_retry(self):
+        """默认（auto_retry_failed 关闭）：失败岗位标 error，不自动放回队列。"""
+        job = _job("default-fail")
+        job["greeting"] = "您好，我对这个岗位很感兴趣。"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "bosshunter.db"
+            db = get_db(db_path)
+            try:
+                insert_job(db, job)
+                update_job_status(db, job["id"], "ready")
+                update_job_greeting(db, job["id"], job["greeting"])
+            finally:
+                db.close()
+
+            failure = {"success": False, "error": "parse_error"}
+            with patch("bosshunter.db.DB_PATH", db_path), patch("bosshunter.executor.sender.should_take_day_off", return_value=False), patch("bosshunter.executor.sender.SendWindowChecker.is_active", return_value=True), patch("bosshunter.executor.sender._sleep_or_stop", return_value=False), patch("bosshunter.executor.sender._send_greeting_once", return_value=(failure, None)):
+                sent = send_greetings({"throttle": {"daily_limit": 10}}, force=True)
+
+            verify_db = get_db(db_path)
+            try:
+                status = verify_db.execute("SELECT status FROM jobs WHERE id = 'default-fail'").fetchone()["status"]
+            finally:
+                verify_db.close()
+
+        self.assertEqual(sent, 0)
+        self.assertEqual(status, "error")
+
+    def test_send_failure_with_auto_retry_returns_to_queue(self):
+        """auto_retry_failed 开启 + 普通错误：失败岗位放回待发送队列（approved）。"""
+        job = _job("auto-retry")
+        job["greeting"] = "您好，我对这个岗位很感兴趣。"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "bosshunter.db"
+            db = get_db(db_path)
+            try:
+                insert_job(db, job)
+                update_job_status(db, job["id"], "ready")
+                update_job_greeting(db, job["id"], job["greeting"])
+            finally:
+                db.close()
+
+            failure = {"success": False, "error": "parse_error"}
+            with patch("bosshunter.db.DB_PATH", db_path), patch("bosshunter.executor.sender.should_take_day_off", return_value=False), patch("bosshunter.executor.sender.SendWindowChecker.is_active", return_value=True), patch("bosshunter.executor.sender._sleep_or_stop", return_value=False), patch("bosshunter.executor.sender._send_greeting_once", return_value=(failure, None)):
+                sent = send_greetings(
+                    {"throttle": {"daily_limit": 10, "auto_retry_failed": True}},
+                    force=True,
+                )
+
+            verify_db = get_db(db_path)
+            try:
+                status = verify_db.execute("SELECT status FROM jobs WHERE id = 'auto-retry'").fetchone()["status"]
+                retry_history = verify_db.execute(
+                    "SELECT COUNT(*) AS c FROM history WHERE job_id = 'auto-retry' AND action = 'retry'"
+                ).fetchone()["c"]
+            finally:
+                verify_db.close()
+
+        self.assertEqual(sent, 0)
+        self.assertEqual(status, "approved")
+        self.assertEqual(retry_history, 1)
+
+    def test_send_failure_risk_signal_never_auto_retries(self):
+        """风控信号（captcha/rate_limit/blocked）即使开启自动重试也标 error，绝不自动放回。"""
+        job = _job("risk-signal")
+        job["greeting"] = "您好，我对这个岗位很感兴趣。"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "bosshunter.db"
+            db = get_db(db_path)
+            try:
+                insert_job(db, job)
+                update_job_status(db, job["id"], "ready")
+                update_job_greeting(db, job["id"], job["greeting"])
+            finally:
+                db.close()
+
+            failure = {"success": False, "error": "rate_limit"}
+            with patch("bosshunter.db.DB_PATH", db_path), patch("bosshunter.executor.sender.should_take_day_off", return_value=False), patch("bosshunter.executor.sender.SendWindowChecker.is_active", return_value=True), patch("bosshunter.executor.sender._sleep_or_stop", return_value=False), patch("bosshunter.executor.sender._send_greeting_once", return_value=(failure, None)):
+                sent = send_greetings(
+                    {"throttle": {"daily_limit": 10, "auto_retry_failed": True}},
+                    force=True,
+                )
+
+            verify_db = get_db(db_path)
+            try:
+                status = verify_db.execute("SELECT status FROM jobs WHERE id = 'risk-signal'").fetchone()["status"]
+            finally:
+                verify_db.close()
+
+        self.assertEqual(sent, 0)
+        self.assertEqual(status, "error")
+
 
 if __name__ == "__main__":
     unittest.main()
