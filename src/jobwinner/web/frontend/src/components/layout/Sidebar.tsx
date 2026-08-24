@@ -46,7 +46,7 @@ export function Sidebar({ pendingReplies: pendingRepliesProp }: SidebarProps) {
       <div className="h-16 flex items-center px-5 border-b border-card-border">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20">
-            <span className="font-black text-sm">BH</span>
+            <span className="font-black text-base">JW</span>
           </div>
           <div>
             <div className="font-black text-sm tracking-tight text-foreground">JobWinner</div>
