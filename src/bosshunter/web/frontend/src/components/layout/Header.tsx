@@ -5,6 +5,7 @@ const pageTitles: Record<string, string> = {
   '/': '工作台',
   '/jobs': '岗位池',
   '/monitor': '监测执行',
+  '/login': '登录管理',
   '/config': '配置',
 }
 

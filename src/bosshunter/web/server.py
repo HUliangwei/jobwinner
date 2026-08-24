@@ -1313,6 +1313,82 @@ def api_ai_diagnostics():
 		return _json_response({"ok": False, "messages": [str(e)]}, 500)
 
 
+# ─── 平台登录管理 ──────────────────────────────────────────
+# 各平台预设：后续增加猎聘/智联等只需在此追加条目。
+PLATFORM_PRESETS = [
+	{
+		"key": "boss",
+		"name": "BOSS 直聘",
+		"url": "https://www.zhipin.com/",
+		"login_markers": ("/login", "/signin", "/user/", "passport", "user/login"),
+	},
+]
+
+
+@app.route("/api/platforms/login")
+def api_platforms_login():
+	"""返回各平台登录状态：浏览器连接情况 + BOSS 直聘页面是否打开/是否登录。"""
+	from bosshunter.browser.diagnostics import run_browser_diagnostics
+	try:
+		config = load_config(CONFIG_PATH)
+		diag = run_browser_diagnostics(config)
+		boss_tab = diag.get("boss_tab")
+		platforms = []
+		for preset in PLATFORM_PRESETS:
+			tab = boss_tab if preset["key"] == "boss" else None
+			url = str((tab or {}).get("url") or "")
+			lower_url = url.lower()
+			logged_in = bool(tab) and not any(
+				marker in lower_url for marker in preset["login_markers"]
+			)
+			login_hint = ""
+			if tab and not logged_in:
+				login_hint = f"已打开 {preset['name']}，但当前页面疑似登录页，请在 Chrome 中完成登录后再刷新检测。"
+			elif not tab and diag.get("chrome"):
+				login_hint = f"Chrome 已连接，但未发现已打开的 {preset['name']} 页面，可点击“打开页面”。"
+			platforms.append({
+				"key": preset["key"],
+				"name": preset["name"],
+				"url": preset["url"],
+				"opened": bool(tab),
+				"logged_in": logged_in,
+				"tab_url": url or None,
+				"tab_title": str((tab or {}).get("title") or "") or None,
+				"login_hint": login_hint,
+			})
+		return _json_response({
+			"ok": True,
+			"runtime": bool(diag.get("runtime")),
+			"chrome": bool(diag.get("chrome")),
+			"browser_name": (diag.get("browser_name") or diag.get("browser_product") or ""),
+			"errors": diag.get("errors") or [],
+			"platforms": platforms,
+		})
+	except Exception as e:
+		return _json_response({"ok": False, "error": str(e)}, 500)
+
+
+@app.route("/api/platforms/login/open", method="POST")
+def api_platforms_login_open():
+	"""在已连接的 Chrome 中打开指定平台首页，便于手动登录。"""
+	from bosshunter.browser import new_tab
+	try:
+		body = request.json or {}
+		key = str(body.get("platform") or "boss")
+		preset = next((p for p in PLATFORM_PRESETS if p["key"] == key), None)
+		if not preset:
+			return _json_response({"ok": False, "error": f"未知平台：{key}"}, 400)
+		target_id = new_tab(preset["url"], background=False)
+		if not target_id:
+			return _json_response(
+				{"ok": False, "error": "无法打开页面：未连接 Chrome 或浏览器运行组件不可用。请先启动带远程调试的 Google Chrome。"},
+				409,
+			)
+		return _json_response({"ok": True, "platform": key, "url": preset["url"], "target_id": target_id})
+	except Exception as e:
+		return _json_response({"ok": False, "error": str(e)}, 500)
+
+
 def _scoring_options_from_body(body: dict) -> dict:
 	raw_options = body.get("options", body)
 	if not isinstance(raw_options, dict):

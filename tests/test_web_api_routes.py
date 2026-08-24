@@ -1867,5 +1867,88 @@ class WebApiRouteTests(unittest.TestCase):
         status, _, body = self._request("/api/greeting/polish", method="POST", json_body={"greeting": "  "})
         self.assertTrue(status.startswith("400"), body)
 
+    def test_platform_login_reports_boss_tab_logged_in(self):
+        diag = {
+            "runtime": True,
+            "chrome": True,
+            "targets": [],
+            "boss_tab": {"url": "https://www.zhipin.com/shanghai/", "title": "BOSS直聘"},
+            "errors": [],
+            "runtime_url": "http://127.0.0.1:3456",
+            "browser_name": "Google Chrome",
+            "browser_product": "Chrome/120.0",
+        }
+        with patch("bosshunter.browser.diagnostics.run_browser_diagnostics", return_value=diag):
+            status, _, body = self._request("/api/platforms/login")
+        payload = json.loads(body)
+        self.assertTrue(status.startswith("200"), body)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["chrome"])
+        self.assertEqual(payload["browser_name"], "Google Chrome")
+        self.assertEqual(len(payload["platforms"]), 1)
+        boss = payload["platforms"][0]
+        self.assertEqual(boss["key"], "boss")
+        self.assertTrue(boss["opened"])
+        self.assertTrue(boss["logged_in"])
+
+    def test_platform_login_flags_login_page_as_not_logged_in(self):
+        diag = {
+            "runtime": True,
+            "chrome": True,
+            "targets": [],
+            "boss_tab": {"url": "https://www.zhipin.com/web/user/?ka=header-login", "title": "登录"},
+            "errors": [],
+            "runtime_url": "http://127.0.0.1:3456",
+            "browser_name": "Google Chrome",
+            "browser_product": "Chrome/120.0",
+        }
+        with patch("bosshunter.browser.diagnostics.run_browser_diagnostics", return_value=diag):
+            status, _, body = self._request("/api/platforms/login")
+        payload = json.loads(body)
+        boss = payload["platforms"][0]
+        self.assertTrue(boss["opened"])
+        self.assertFalse(boss["logged_in"])
+        self.assertIn("登录", boss["login_hint"])
+
+    def test_platform_login_reports_chrome_disconnected(self):
+        diag = {
+            "runtime": True,
+            "chrome": False,
+            "targets": None,
+            "boss_tab": None,
+            "errors": ["Chrome is not connected to Browser Runtime."],
+            "runtime_url": "http://127.0.0.1:3456",
+            "browser_name": "",
+            "browser_product": "",
+        }
+        with patch("bosshunter.browser.diagnostics.run_browser_diagnostics", return_value=diag):
+            status, _, body = self._request("/api/platforms/login")
+        payload = json.loads(body)
+        self.assertFalse(payload["chrome"])
+        boss = payload["platforms"][0]
+        self.assertFalse(boss["opened"])
+        self.assertFalse(boss["logged_in"])
+        self.assertTrue(payload["errors"])
+
+    def test_platform_login_open_opens_boss_tab(self):
+        with patch("bosshunter.browser.new_tab", return_value="target-123"):
+            status, _, body = self._request(
+                "/api/platforms/login/open", method="POST", json_body={"platform": "boss"}
+            )
+        payload = json.loads(body)
+        self.assertTrue(status.startswith("200"), body)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["target_id"], "target-123")
+        self.assertIn("zhipin.com", payload["url"])
+
+    def test_platform_login_open_rejects_unknown_platform(self):
+        status, _, body = self._request(
+            "/api/platforms/login/open", method="POST", json_body={"platform": "liepin"}
+        )
+        payload = json.loads(body)
+        self.assertTrue(status.startswith("400"), body)
+        self.assertFalse(payload["ok"])
+        self.assertIn("未知平台", payload["error"])
+
 if __name__ == "__main__":
     unittest.main()
