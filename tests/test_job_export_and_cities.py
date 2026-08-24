@@ -9,9 +9,9 @@ from unittest.mock import patch
 import pytest
 from openpyxl import load_workbook
 
-from bosshunter.cities import CityRefreshError, load_city_snapshot, refresh_city_cache
-from bosshunter.db import get_db, insert_job, update_job_status
-from bosshunter.job_export import InvalidJobSelectionError, build_csv, build_xlsx, export_jobs
+from jobwinner.cities import CityRefreshError, load_city_snapshot, refresh_city_cache
+from jobwinner.db import get_db, insert_job, update_job_status
+from jobwinner.job_export import InvalidJobSelectionError, build_csv, build_xlsx, export_jobs
 
 
 def _job(job_id: str, *, city: str = "北京", company: str = "Example") -> dict:
@@ -39,7 +39,7 @@ def _csv_ids(content: bytes) -> set[str]:
 
 
 def test_bundled_city_snapshot_is_complete_and_offline(tmp_path):
-	with patch("bosshunter.cities.httpx.get") as http_get:
+	with patch("jobwinner.cities.httpx.get") as http_get:
 		snapshot = load_city_snapshot(cache_path=tmp_path / "cities.cache.json")
 
 	assert snapshot["source"] == "bundled"
@@ -57,7 +57,7 @@ def test_bundled_city_snapshot_is_complete_and_offline(tmp_path):
 def test_invalid_city_cache_falls_back_without_network(tmp_path):
 	cache_path = tmp_path / "cities.cache.json"
 	cache_path.write_text("<html>not-json</html>", encoding="utf-8")
-	with patch("bosshunter.cities.httpx.get") as http_get:
+	with patch("jobwinner.cities.httpx.get") as http_get:
 		snapshot = load_city_snapshot(cache_path=cache_path)
 
 	assert snapshot["source"] == "bundled"

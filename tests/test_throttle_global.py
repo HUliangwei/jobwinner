@@ -4,7 +4,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from bosshunter.throttle import GlobalRequestGate, PageThrottle, RequestThrottle
+from jobwinner.throttle import GlobalRequestGate, PageThrottle, RequestThrottle
 
 
 class GlobalRequestGateTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 import unittest
 
-from bosshunter.ai.prefilter import quick_score
-from bosshunter.job_filters import matching_blocked_company, parse_monthly_salary_k
+from jobwinner.ai.prefilter import quick_score
+from jobwinner.job_filters import matching_blocked_company, parse_monthly_salary_k
 
 
 class JobFilterTests(unittest.TestCase):

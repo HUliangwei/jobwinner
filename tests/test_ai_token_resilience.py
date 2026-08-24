@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from bosshunter.ai import credentials, greeter, scorer
+from jobwinner.ai import credentials, greeter, scorer
 
 
 def _job(job_id: str) -> dict:
@@ -57,7 +57,7 @@ class AiCredentialErrorTests(unittest.TestCase):
             }
         }
 
-        with patch("bosshunter.ai.credentials.httpx.post", return_value=response):
+        with patch("jobwinner.ai.credentials.httpx.post", return_value=response):
             with self.assertRaises(credentials.AIRequestError) as raised:
                 credentials.call_openai_compatible_text("prompt", config, 256)
 
@@ -98,7 +98,7 @@ class AiCredentialErrorTests(unittest.TestCase):
             }
         }
 
-        with patch("bosshunter.ai.credentials.httpx.post", return_value=response):
+        with patch("jobwinner.ai.credentials.httpx.post", return_value=response):
             with self.assertRaises(credentials.AIRequestError) as raised:
                 credentials.call_openai_compatible_text("prompt", config, 256)
 
@@ -169,14 +169,14 @@ class ScorerTokenResilienceTests(unittest.TestCase):
         }"""
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=[job]),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
-            patch("bosshunter.ai.scorer._call_claude", side_effect=[first, review]) as call_ai,
-            patch("bosshunter.ai.scorer.update_job_quick_score"),
-            patch("bosshunter.ai.scorer.update_job_score") as update_score,
-            patch("bosshunter.ai.scorer.update_job_status"),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=[job]),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer._call_claude", side_effect=[first, review]) as call_ai,
+            patch("jobwinner.ai.scorer.update_job_quick_score"),
+            patch("jobwinner.ai.scorer.update_job_score") as update_score,
+            patch("jobwinner.ai.scorer.update_job_status"),
         ):
             scored, filtered = scorer.score_jobs(
                 {
@@ -213,14 +213,14 @@ class ScorerTokenResilienceTests(unittest.TestCase):
             write_threads.append(get_ident())
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=jobs),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
-            patch("bosshunter.ai.scorer._call_claude", side_effect=call_ai),
-            patch("bosshunter.ai.scorer.update_job_quick_score", side_effect=record_write),
-            patch("bosshunter.ai.scorer.update_job_score", side_effect=record_write),
-            patch("bosshunter.ai.scorer.update_job_status", side_effect=record_write),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=jobs),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer._call_claude", side_effect=call_ai),
+            patch("jobwinner.ai.scorer.update_job_quick_score", side_effect=record_write),
+            patch("jobwinner.ai.scorer.update_job_score", side_effect=record_write),
+            patch("jobwinner.ai.scorer.update_job_status", side_effect=record_write),
         ):
             scored, filtered = scorer.score_jobs(
                 {"ai": {"scoring_concurrency": 3}, "scoring": {"threshold": 71}}
@@ -256,14 +256,14 @@ class ScorerTokenResilienceTests(unittest.TestCase):
                 finished.set()
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=[_job("1"), _job("2")]),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
-            patch("bosshunter.ai.scorer._call_claude", side_effect=blocking_ai),
-            patch("bosshunter.ai.scorer.update_job_quick_score"),
-            patch("bosshunter.ai.scorer.update_job_score"),
-            patch("bosshunter.ai.scorer.update_job_status"),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=[_job("1"), _job("2")]),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer._call_claude", side_effect=blocking_ai),
+            patch("jobwinner.ai.scorer.update_job_quick_score"),
+            patch("jobwinner.ai.scorer.update_job_score"),
+            patch("jobwinner.ai.scorer.update_job_status"),
         ):
             thread = Thread(target=run_scoring)
             thread.start()
@@ -281,17 +281,17 @@ class ScorerTokenResilienceTests(unittest.TestCase):
         new_job = _job("new")
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=[old_job, new_job]),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=[old_job, new_job]),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
             patch(
-                "bosshunter.ai.scorer._call_claude",
+                "jobwinner.ai.scorer._call_claude",
                 return_value=_score_response(82),
             ) as call_ai,
-            patch("bosshunter.ai.scorer.update_job_quick_score") as update_quick_score,
-            patch("bosshunter.ai.scorer.update_job_score"),
-            patch("bosshunter.ai.scorer.update_job_status"),
+            patch("jobwinner.ai.scorer.update_job_quick_score") as update_quick_score,
+            patch("jobwinner.ai.scorer.update_job_score"),
+            patch("jobwinner.ai.scorer.update_job_status"),
         ):
             scored, filtered = scorer.score_jobs(
                 {"scoring": {"threshold": 70}},
@@ -310,20 +310,20 @@ class ScorerTokenResilienceTests(unittest.TestCase):
         progress_updates: list[dict] = []
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=[job]),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=[job]),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
             patch(
-                "bosshunter.ai.scorer._call_claude",
+                "jobwinner.ai.scorer._call_claude",
                 side_effect=[
                     "这不是完整 JSON",
                     _score_response(82),
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.scorer.update_job_quick_score"),
-            patch("bosshunter.ai.scorer.update_job_score"),
-            patch("bosshunter.ai.scorer.update_job_status"),
+            patch("jobwinner.ai.scorer.update_job_quick_score"),
+            patch("jobwinner.ai.scorer.update_job_score"),
+            patch("jobwinner.ai.scorer.update_job_status"),
         ):
             scored, filtered = scorer.score_jobs(
                 {
@@ -343,20 +343,20 @@ class ScorerTokenResilienceTests(unittest.TestCase):
         job = _job("long")
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="简历内容" * 1000),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=[job]),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="简历内容" * 1000),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=[job]),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
             patch(
-                "bosshunter.ai.scorer._call_claude",
+                "jobwinner.ai.scorer._call_claude",
                 side_effect=[
                     credentials.AIRequestError("context_limit", "请求内容超过当前模型的上下文限制"),
                     _score_response(78),
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.scorer.update_job_quick_score"),
-            patch("bosshunter.ai.scorer.update_job_score"),
-            patch("bosshunter.ai.scorer.update_job_status"),
+            patch("jobwinner.ai.scorer.update_job_quick_score"),
+            patch("jobwinner.ai.scorer.update_job_score"),
+            patch("jobwinner.ai.scorer.update_job_status"),
         ):
             scored, _ = scorer.score_jobs({
                 "ai": {"scoring_second_review": False},
@@ -377,20 +377,20 @@ class ScorerTokenResilienceTests(unittest.TestCase):
         logs: list[str] = []
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=[job]),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=[job]),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
             patch(
-                "bosshunter.ai.scorer._call_claude",
+                "jobwinner.ai.scorer._call_claude",
                 side_effect=[
                     credentials.AIRequestError("output_limit", "当前模型不接受设置的输出 Token 上限"),
                     _score_response(82),
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.scorer.update_job_quick_score"),
-            patch("bosshunter.ai.scorer.update_job_score"),
-            patch("bosshunter.ai.scorer.update_job_status"),
+            patch("jobwinner.ai.scorer.update_job_quick_score"),
+            patch("jobwinner.ai.scorer.update_job_score"),
+            patch("jobwinner.ai.scorer.update_job_status"),
         ):
             scored, filtered = scorer.score_jobs(
                 {
@@ -410,20 +410,20 @@ class ScorerTokenResilienceTests(unittest.TestCase):
         logs: list[str] = []
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=[job]),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=[job]),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
             patch(
-                "bosshunter.ai.scorer._call_claude",
+                "jobwinner.ai.scorer._call_claude",
                 side_effect=[
                     credentials.AIRequestError("output_truncated", "AI 返回内容因输出 Token 上限被截断"),
                     _score_response(82),
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.scorer.update_job_quick_score"),
-            patch("bosshunter.ai.scorer.update_job_score"),
-            patch("bosshunter.ai.scorer.update_job_status"),
+            patch("jobwinner.ai.scorer.update_job_quick_score"),
+            patch("jobwinner.ai.scorer.update_job_score"),
+            patch("jobwinner.ai.scorer.update_job_status"),
         ):
             scored, filtered = scorer.score_jobs(
                 {
@@ -442,17 +442,17 @@ class ScorerTokenResilienceTests(unittest.TestCase):
         logs: list[str] = []
 
         with (
-            patch("bosshunter.ai.scorer.get_db", return_value=db),
-            patch("bosshunter.ai.scorer._load_resume", return_value="真实简历"),
-            patch("bosshunter.ai.scorer.get_jobs_by_status", return_value=jobs),
-            patch("bosshunter.ai.scorer.quick_score", return_value=(80, "通过")),
+            patch("jobwinner.ai.scorer.get_db", return_value=db),
+            patch("jobwinner.ai.scorer._load_resume", return_value="真实简历"),
+            patch("jobwinner.ai.scorer.get_jobs_by_status", return_value=jobs),
+            patch("jobwinner.ai.scorer.quick_score", return_value=(80, "通过")),
             patch(
-                "bosshunter.ai.scorer._call_claude",
+                "jobwinner.ai.scorer._call_claude",
                 side_effect=credentials.AIRequestError("token_quota", "AI Token 额度或账户余额不足"),
             ) as call_ai,
-            patch("bosshunter.ai.scorer.update_job_quick_score"),
-            patch("bosshunter.ai.scorer.update_job_score"),
-            patch("bosshunter.ai.scorer.update_job_status") as update_status,
+            patch("jobwinner.ai.scorer.update_job_quick_score"),
+            patch("jobwinner.ai.scorer.update_job_score"),
+            patch("jobwinner.ai.scorer.update_job_status") as update_status,
         ):
             scored, filtered = scorer.score_jobs(
                 {
@@ -491,18 +491,18 @@ class GreeterTokenResilienceTests(unittest.TestCase):
         logs: list[str] = []
 
         with (
-            patch("bosshunter.ai.greeter.get_db", return_value=db),
-            patch("bosshunter.ai.greeter.get_jobs_by_status", return_value=jobs),
-            patch("bosshunter.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
+            patch("jobwinner.ai.greeter.get_db", return_value=db),
+            patch("jobwinner.ai.greeter.get_jobs_by_status", return_value=jobs),
+            patch("jobwinner.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
             patch(
-                "bosshunter.ai.greeter._call_claude",
+                "jobwinner.ai.greeter._call_claude",
                 side_effect=[
                     "这是一条可用的个性化招呼语。",
                     "评分很好，但没有按 JSON 返回。",
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.greeter.update_job_greeting") as update_greeting,
-            patch("bosshunter.ai.greeter.update_job_status") as update_status,
+            patch("jobwinner.ai.greeter.update_job_greeting") as update_greeting,
+            patch("jobwinner.ai.greeter.update_job_status") as update_status,
         ):
             count = greeter.generate_greetings(
                 {
@@ -526,16 +526,16 @@ class GreeterTokenResilienceTests(unittest.TestCase):
         jobs = [_job("retry-empty")]
 
         with (
-            patch("bosshunter.ai.greeter.get_db", return_value=db),
-            patch("bosshunter.ai.greeter.get_jobs_by_status", return_value=jobs),
-            patch("bosshunter.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
+            patch("jobwinner.ai.greeter.get_db", return_value=db),
+            patch("jobwinner.ai.greeter.get_jobs_by_status", return_value=jobs),
+            patch("jobwinner.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
             patch(
-                "bosshunter.ai.greeter._call_claude",
+                "jobwinner.ai.greeter._call_claude",
                 side_effect=[None, "第二次生成成功的个性化招呼语"],
             ) as call_ai,
-            patch("bosshunter.ai.greeter.update_job_greeting") as update_greeting,
-            patch("bosshunter.ai.greeter.update_job_status"),
-            patch("bosshunter.ai.greeter.add_history") as add_history,
+            patch("jobwinner.ai.greeter.update_job_greeting") as update_greeting,
+            patch("jobwinner.ai.greeter.update_job_status"),
+            patch("jobwinner.ai.greeter.add_history") as add_history,
         ):
             count = greeter.generate_greetings(
                 {
@@ -561,18 +561,18 @@ class GreeterTokenResilienceTests(unittest.TestCase):
         logs: list[str] = []
 
         with (
-            patch("bosshunter.ai.greeter.get_db", return_value=db),
-            patch("bosshunter.ai.greeter.get_jobs_by_status", return_value=jobs),
-            patch("bosshunter.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
+            patch("jobwinner.ai.greeter.get_db", return_value=db),
+            patch("jobwinner.ai.greeter.get_jobs_by_status", return_value=jobs),
+            patch("jobwinner.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
             patch(
-                "bosshunter.ai.greeter._call_claude",
+                "jobwinner.ai.greeter._call_claude",
                 side_effect=[
                     "这是一条已经可以使用的个性化招呼语。",
                     credentials.AIRequestError("token_quota", "AI Token 额度或账户余额不足"),
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.greeter.update_job_greeting") as update_greeting,
-            patch("bosshunter.ai.greeter.update_job_status"),
+            patch("jobwinner.ai.greeter.update_job_greeting") as update_greeting,
+            patch("jobwinner.ai.greeter.update_job_status"),
         ):
             count = greeter.generate_greetings(
                 {
@@ -596,18 +596,18 @@ class GreeterTokenResilienceTests(unittest.TestCase):
         logs: list[str] = []
 
         with (
-            patch("bosshunter.ai.greeter.get_db", return_value=db),
-            patch("bosshunter.ai.greeter.get_jobs_by_status", return_value=jobs),
-            patch("bosshunter.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
+            patch("jobwinner.ai.greeter.get_db", return_value=db),
+            patch("jobwinner.ai.greeter.get_jobs_by_status", return_value=jobs),
+            patch("jobwinner.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
             patch(
-                "bosshunter.ai.greeter._call_claude",
+                "jobwinner.ai.greeter._call_claude",
                 side_effect=[
                     credentials.AIRequestError("output_limit", "当前模型不接受设置的输出 Token 上限"),
                     "个性化招呼语",
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.greeter.update_job_greeting") as update_greeting,
-            patch("bosshunter.ai.greeter.update_job_status"),
+            patch("jobwinner.ai.greeter.update_job_greeting") as update_greeting,
+            patch("jobwinner.ai.greeter.update_job_status"),
         ):
             count = greeter.generate_greetings(
                 {
@@ -628,18 +628,18 @@ class GreeterTokenResilienceTests(unittest.TestCase):
         logs: list[str] = []
 
         with (
-            patch("bosshunter.ai.greeter.get_db", return_value=db),
-            patch("bosshunter.ai.greeter.get_jobs_by_status", return_value=jobs),
-            patch("bosshunter.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
+            patch("jobwinner.ai.greeter.get_db", return_value=db),
+            patch("jobwinner.ai.greeter.get_jobs_by_status", return_value=jobs),
+            patch("jobwinner.ai.greeter._get_resume_summary", return_value="真实简历摘要"),
             patch(
-                "bosshunter.ai.greeter._call_claude",
+                "jobwinner.ai.greeter._call_claude",
                 side_effect=[
                     credentials.AIRequestError("output_truncated", "AI 返回内容因输出 Token 上限被截断"),
                     "完整的个性化招呼语",
                 ],
             ) as call_ai,
-            patch("bosshunter.ai.greeter.update_job_greeting"),
-            patch("bosshunter.ai.greeter.update_job_status"),
+            patch("jobwinner.ai.greeter.update_job_greeting"),
+            patch("jobwinner.ai.greeter.update_job_status"),
         ):
             count = greeter.generate_greetings(
                 {

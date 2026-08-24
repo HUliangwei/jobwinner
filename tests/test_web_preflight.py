@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 import httpx
 
-from bosshunter.web.preflight import check_ai_connection, check_browser_connection
+from jobwinner.web.preflight import check_ai_connection, check_browser_connection
 
 
 class AiPreflightTests(unittest.TestCase):
@@ -14,7 +14,7 @@ class AiPreflightTests(unittest.TestCase):
 		self.assertEqual(checks[0]["status"], "error")
 		self.assertIn("填写 API Key", checks[0]["detail"])
 
-	@patch("bosshunter.web.preflight.httpx.get")
+	@patch("jobwinner.web.preflight.httpx.get")
 	def test_rejected_api_key_is_reported_without_exposing_key(self, http_get):
 		http_get.return_value = Mock(status_code=401)
 		config = {"ai": {"api_key": "secret-key", "model": "claude-sonnet-4-6"}}
@@ -25,7 +25,7 @@ class AiPreflightTests(unittest.TestCase):
 		self.assertIn("API Key 验证失败", checks[0]["message"])
 		self.assertNotIn("secret-key", str(checks))
 
-	@patch("bosshunter.web.preflight.httpx.get")
+	@patch("jobwinner.web.preflight.httpx.get")
 	def test_valid_api_connection_returns_pass(self, http_get):
 		http_get.return_value = Mock(status_code=200)
 		config = {"ai": {"api_key": "secret-key", "model": "claude-sonnet-4-6"}}
@@ -51,7 +51,7 @@ class AiPreflightTests(unittest.TestCase):
 		self.assertEqual(checks[0]["id"], "ai_base_url")
 		self.assertEqual(checks[0]["status"], "error")
 
-	@patch("bosshunter.web.preflight.httpx.get")
+	@patch("jobwinner.web.preflight.httpx.get")
 	def test_ai_timeout_has_specific_feedback(self, http_get):
 		http_get.side_effect = httpx.ReadTimeout("timed out")
 		config = {"ai": {"api_key": "secret-key", "model": "claude-sonnet-4-6"}}
@@ -63,7 +63,7 @@ class AiPreflightTests(unittest.TestCase):
 
 
 class BrowserPreflightTests(unittest.TestCase):
-	@patch("bosshunter.web.preflight.run_browser_diagnostics")
+	@patch("jobwinner.web.preflight.run_browser_diagnostics")
 	def test_running_runtime_is_reused_when_node_is_not_on_path(self, diagnostics):
 		diagnostics.return_value = {
 			"node": {"available": False, "version": None},
@@ -82,7 +82,7 @@ class BrowserPreflightTests(unittest.TestCase):
 		self.assertEqual(runtime_check["status"], "pass")
 		self.assertNotIn("Node.js", str(checks))
 
-	@patch("bosshunter.web.preflight.run_browser_diagnostics")
+	@patch("jobwinner.web.preflight.run_browser_diagnostics")
 	def test_missing_remote_debugging_is_reported(self, diagnostics):
 		diagnostics.return_value = {
 			"node": {"available": True, "version": "v22"},
@@ -98,7 +98,7 @@ class BrowserPreflightTests(unittest.TestCase):
 		self.assertEqual(chrome_check["status"], "error")
 		self.assertIn("chrome://inspect/#remote-debugging", chrome_check["detail"])
 
-	@patch("bosshunter.web.preflight.run_browser_diagnostics")
+	@patch("jobwinner.web.preflight.run_browser_diagnostics")
 	def test_non_google_browser_is_reported(self, diagnostics):
 		diagnostics.return_value = {
 			"node": {"available": True, "version": "v22"},
@@ -116,7 +116,7 @@ class BrowserPreflightTests(unittest.TestCase):
 		self.assertEqual(product_check["status"], "error")
 		self.assertIn("不是 Google Chrome", product_check["message"])
 
-	@patch("bosshunter.web.preflight.run_browser_diagnostics")
+	@patch("jobwinner.web.preflight.run_browser_diagnostics")
 	def test_chromium_name_is_rejected_even_when_product_looks_like_chrome(self, diagnostics):
 		diagnostics.return_value = {
 			"node": {"available": True, "version": "v22"},

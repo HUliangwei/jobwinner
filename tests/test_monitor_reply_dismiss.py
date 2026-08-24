@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from bosshunter.db import add_history, get_db, get_jobs_needing_resume, insert_job, update_job_status
+from jobwinner.db import add_history, get_db, get_jobs_needing_resume, insert_job, update_job_status
 
 
 def _job(job_id: str) -> dict:
@@ -27,7 +27,7 @@ def _job(job_id: str) -> dict:
 
 class MonitorReplyDismissTests(unittest.TestCase):
     def test_dismissed_pending_reply_is_not_recreated_by_monitor(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         messages = [
             {"sender": "me", "text": "您好，我对岗位很感兴趣。"},
@@ -36,7 +36,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         pending_detail = monitor._build_reply_detail(messages, "可以，我有AI内容运营经验。")
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "data" / "bosshunter.db"
+            db_path = Path(tmp) / "data" / "jobwinner.db"
             db = get_db(db_path)
             try:
                 insert_job(db, _job("job-1"))
@@ -82,7 +82,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         generate_reply.assert_not_called()
 
     def test_new_hr_message_after_dismissed_reply_creates_new_pending_reply(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         dismissed_messages = [
             {"sender": "me", "text": "您好，我对岗位很感兴趣。"},
@@ -95,7 +95,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         pending_detail = monitor._build_reply_detail(dismissed_messages, "可以，我有AI内容运营经验。")
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "data" / "bosshunter.db"
+            db_path = Path(tmp) / "data" / "jobwinner.db"
             db = get_db(db_path)
             try:
                 insert_job(db, _job("job-2"))
@@ -141,7 +141,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         generate_reply.assert_called_once()
 
     def test_resume_request_card_with_reject_button_is_not_treated_as_rejection(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         messages = [
             {"sender": "hr", "text": "您是否接受此工作地点? 理想国际大厦 暂不考虑可以接受"},
@@ -157,7 +157,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         self.assertFalse(monitor._detect_rejection(messages))
 
     def test_short_positive_hr_replies_are_treated_as_resume_intent(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         for reply in ("好", "好的！", "可以。"):
             with self.subTest(reply=reply):
@@ -168,7 +168,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
                 self.assertTrue(monitor._detect_resume_request(messages))
 
     def test_words_containing_positive_reply_text_are_not_treated_as_resume_intent(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         for reply in ("不可以", "好像可以", "可以接受此工作地点"):
             with self.subTest(reply=reply):
@@ -179,7 +179,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
                 self.assertFalse(monitor._detect_resume_request(messages))
 
     def test_short_positive_hr_reply_generates_tailored_resume(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         messages = [
             {"sender": "me", "text": "如果合适，我可以补充发送简历。"},
@@ -187,7 +187,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "data" / "bosshunter.db"
+            db_path = Path(tmp) / "data" / "jobwinner.db"
             generated_resume = Path(tmp) / "tailored.md"
             generated_resume.write_text("# 定制简历", encoding="utf-8")
             db = get_db(db_path)
@@ -207,7 +207,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
                  patch.object(monitor, "_send_message_in_chat", return_value=True), \
                  patch.object(monitor.time, "sleep"), \
                  patch(
-                     "bosshunter.ai.resume.generate_tailored_resume",
+                     "jobwinner.ai.resume.generate_tailored_resume",
                      return_value=generated_resume,
                  ) as generate_resume:
                 action = monitor._handle_conversation(
@@ -232,7 +232,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         generate_resume.assert_called_once()
 
     def test_failed_tailored_resume_generation_does_not_mark_job_needs_resume(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         messages = [
             {"sender": "me", "text": "您好，我对岗位很感兴趣。"},
@@ -240,7 +240,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "data" / "bosshunter.db"
+            db_path = Path(tmp) / "data" / "jobwinner.db"
             db = get_db(db_path)
             try:
                 insert_job(db, _job("job-resume-failed"))
@@ -256,7 +256,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
                  patch.object(monitor, "evaluate", return_value=json.dumps(messages, ensure_ascii=False)), \
                  patch.object(monitor, "close_tab"), \
                  patch.object(monitor, "_send_message_in_chat", return_value=True), \
-                 patch("bosshunter.ai.resume.generate_tailored_resume", return_value=None):
+                 patch("jobwinner.ai.resume.generate_tailored_resume", return_value=None):
                 action = monitor._handle_conversation(
                     _job("job-resume-failed") | {"status": "sent"},
                     {"profile": {"portfolio_url": "https://example.com/resume"}},
@@ -286,7 +286,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         self.assertEqual(needing_resume, [])
 
     def test_resume_failure_history_keeps_hr_message_and_system_reason_separate(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         messages = [
             {"sender": "me", "text": "您好，我对岗位很感兴趣。"},
@@ -294,7 +294,7 @@ class MonitorReplyDismissTests(unittest.TestCase):
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "data" / "bosshunter.db"
+            db_path = Path(tmp) / "data" / "jobwinner.db"
             db = get_db(db_path)
             try:
                 insert_job(db, _job("job-resume-reason"))
@@ -310,9 +310,9 @@ class MonitorReplyDismissTests(unittest.TestCase):
                  patch.object(monitor, "evaluate", return_value=json.dumps(messages, ensure_ascii=False)), \
                  patch.object(monitor, "close_tab"), \
                  patch.object(monitor, "_send_message_in_chat", return_value=True), \
-                 patch("bosshunter.ai.resume.generate_tailored_resume", return_value=None), \
+                 patch("jobwinner.ai.resume.generate_tailored_resume", return_value=None), \
                  patch(
-                     "bosshunter.ai.resume.get_last_resume_failure_reason",
+                     "jobwinner.ai.resume.get_last_resume_failure_reason",
                      return_value="占位符校验失败：模型新增了 [待填写姓名]",
                  ):
                 action = monitor._handle_conversation(

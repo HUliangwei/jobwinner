@@ -26,7 +26,7 @@ assignees: ''
 ## 环境信息
 
 - Chrome 版本: [如 125.x]
-- BossHunter 版本: [运行 `bosshunter --version`]
+- JobWinner 版本: [运行 `jobwinner --version`]
 - 发生日期: [某直聘可能在此日期更新了页面]
 
 ## 临时解决方案

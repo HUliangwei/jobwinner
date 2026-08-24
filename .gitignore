@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 *.egg-info/
 dist/
-!src/bosshunter/web/frontend/dist/
+!src/jobwinner/web/frontend/dist/
 build/
 *.egg
 
@@ -27,8 +27,8 @@ resume.md
 
 # Data (contains personal info, resumes, DB)
 data/
-!src/bosshunter/data/
-!src/bosshunter/data/boss_cities.json
+!src/jobwinner/data/
+!src/jobwinner/data/boss_cities.json
 *.db
 *.db-shm
 *.db-wal

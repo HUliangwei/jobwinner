@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from bosshunter.ai.scorer import score_jobs
-from bosshunter.db import (
+from jobwinner.ai.scorer import score_jobs
+from jobwinner.db import (
     JobDeletionConflictError,
     add_history,
     get_db,
@@ -110,9 +110,9 @@ def test_scoring_never_selects_soft_deleted_pending_jobs(tmp_path):
     finally:
         db.close()
 
-    with patch("bosshunter.ai.scorer.get_db", side_effect=lambda: get_db(db_path)), \
-         patch("bosshunter.ai.scorer._load_resume", return_value="resume"), \
-         patch("bosshunter.ai.scorer._request_score") as request_score:
+    with patch("jobwinner.ai.scorer.get_db", side_effect=lambda: get_db(db_path)), \
+         patch("jobwinner.ai.scorer._load_resume", return_value="resume"), \
+         patch("jobwinner.ai.scorer._request_score") as request_score:
         assert score_jobs({"scoring": {"threshold": 60}}) == (0, 0)
 
     request_score.assert_not_called()

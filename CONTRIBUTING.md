@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你对 BossHunter 的关注！欢迎提交 Issue 和 Pull Request。
+感谢你对 JobWinner 的关注！欢迎提交 Issue 和 Pull Request。
 
 ## 行为准则
 
@@ -33,7 +33,7 @@
 
 1. Fork 仓库
 2. 基于 `main` 创建功能分支：`git checkout -b feat/your-feature`
-3. 提交代码，确保 `bosshunter --help` 正常运行
+3. 提交代码，确保 `jobwinner --help` 正常运行
 4. 推送并创建 Pull Request
 5. 等待 review
 
@@ -52,7 +52,7 @@ pip install -e ".[dev]"
 ruff check src/
 
 # 运行 CLI
-bosshunter --help
+jobwinner --help
 ```
 
 ## 选择器维护

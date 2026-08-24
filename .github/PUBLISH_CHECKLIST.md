@@ -8,10 +8,10 @@
 
 **问题**：项目名包含 "某直聘" 商标
 **解决**：
-- [x] 对外名称改为 `BossHunter`（中性名称）
+- [x] 对外名称改为 `JobWinner`（中性名称）
 - [x] README 免责声明放在最顶部
 - [x] LICENSE 追加 ADDITIONAL DISCLAIMER
-- [x] 代码中移除 "bosshunter" → 改为 "bosshunter"（包名、模块名）
+- [x] 代码中移除 "jobwinner" → 改为 "jobwinner"（包名、模块名）
 - [ ] 注释和文档中仅以 "目标平台" 或功能描述指代
 
 ### Tiger 2: 敏感数据泄露
@@ -57,14 +57,14 @@
 ## 发布前 Checklist
 
 ### 代码层面
-- [x] 全局替换 `bosshunter` → `bosshunter`（包名、import、CLI 名）
+- [x] 全局替换 `jobwinner` → `jobwinner`（包名、import、CLI 名）
 - [ ] 移除所有硬编码的个人信息（简历内容、城市偏好等）
 - [ ] 确认 `config.py` DEFAULTS 中无个人偏好泄露
 - [ ] 搜索并移除所有 API Key / Token 硬编码
 - [ ] 移除所有 debug/dev 时的临时代码
 
 ### 前端层面
-- [ ] 构建 production 版本：`cd src/bosshunter/web/frontend && npm run build`
+- [ ] 构建 production 版本：`cd src/jobwinner/web/frontend && npm run build`
 - [ ] 确认构建产物不含 source map（隐私）
 - [ ] 移除 package-lock.json 中的私有 registry（如有）
 
@@ -89,11 +89,11 @@
 
 | 原名 | 新名 | 位置 |
 |------|------|------|
-| bosshunter | bosshunter | Python 包名 |
-| BossHunter | BossHunter | 项目显示名 |
-| bosshunter.db | bosshunter.db | 数据库文件名 |
-| `bosshunter` CLI | `bosshunter` CLI | 命令行入口 |
-| src/bosshunter/ | src/bosshunter/ | 源码目录 |
+| jobwinner | jobwinner | Python 包名 |
+| JobWinner | JobWinner | 项目显示名 |
+| jobwinner.db | jobwinner.db | 数据库文件名 |
+| `jobwinner` CLI | `jobwinner` CLI | 命令行入口 |
+| src/jobwinner/ | src/jobwinner/ | 源码目录 |
 
 ---
 

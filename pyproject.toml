@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bosshunter"
+name = "jobwinner"
 version = "2.3.0"
-description = "BOSS直聘智能求职Agent - 端到端自动化求职工具"
+description = "JobWinner 智能求职Agent - 端到端自动化求职工具"
 requires-python = ">=3.10"
 license = "LicenseRef-BossHunter-NonCommercial"
 dependencies = [
@@ -27,14 +27,14 @@ pdf = [
 ]
 
 [project.scripts]
-bosshunter = "bosshunter.main:cli"
+jobwinner = "jobwinner.main:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bosshunter"]
+packages = ["src/jobwinner"]
 artifacts = [
-    "src/bosshunter/browser/runtime/*.mjs",
-    "src/bosshunter/browser/runtime/site-patterns/*.md",
-    "src/bosshunter/data/*.json",
+    "src/jobwinner/browser/runtime/*.mjs",
+    "src/jobwinner/browser/runtime/site-patterns/*.md",
+    "src/jobwinner/data/*.json",
 ]
 
 [tool.pytest.ini_options]

@@ -2,8 +2,8 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from bosshunter.config import load_config
-from bosshunter.ai.scorer import get_scoring_concurrency
+from jobwinner.config import load_config
+from jobwinner.ai.scorer import get_scoring_concurrency
 
 
 class ScoringConfigTests(unittest.TestCase):

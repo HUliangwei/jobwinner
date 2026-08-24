@@ -4,8 +4,8 @@ import unittest
 from threading import Event, Thread
 from unittest.mock import Mock, patch
 
-from bosshunter.cancellation import OperationCancelled, run_cancellable
-from bosshunter.throttle import PageThrottle
+from jobwinner.cancellation import OperationCancelled, run_cancellable
+from jobwinner.throttle import PageThrottle
 
 
 class CancellationTests(unittest.TestCase):
@@ -13,7 +13,7 @@ class CancellationTests(unittest.TestCase):
         stop_event = Event()
         stop_event.set()
 
-        with patch("bosshunter.throttle.time.sleep") as sleep:
+        with patch("jobwinner.throttle.time.sleep") as sleep:
             stopped = PageThrottle(delay_min=30, delay_max=30).wait(stop_event)
 
         self.assertTrue(stopped)
@@ -58,7 +58,7 @@ class CancellationTests(unittest.TestCase):
         operation.assert_not_called()
 
     def test_monitor_discards_cancelled_ai_reply_without_sending_or_recording(self):
-        from bosshunter.executor import monitor
+        from jobwinner.executor import monitor
 
         messages = [
             {"sender": "me", "text": "对岗位很感兴趣。"},

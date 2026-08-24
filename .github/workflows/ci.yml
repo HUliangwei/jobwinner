@@ -25,13 +25,13 @@ jobs:
         run: pip install -e .
 
       - name: Verify CLI entry point
-        run: bosshunter --help
+        run: jobwinner --help
 
       - name: Verify version output
-        run: bosshunter --version
+        run: jobwinner --version
 
       - name: Run import check
-        run: python -c "import bosshunter; print(bosshunter.__version__)"
+        run: python -c "import jobwinner; print(jobwinner.__version__)"
 
       - name: Lint with ruff (if available)
         run: |

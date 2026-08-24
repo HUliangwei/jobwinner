@@ -4,7 +4,7 @@ import threading
 import time
 import unittest
 
-from bosshunter.browser_lock import (
+from jobwinner.browser_lock import (
     BROWSER_LOCK,
     BrowserPriority,
     PlatformBrowserLock,

@@ -1,4 +1,4 @@
-# BossHunter Skill
+# JobWinner Skill
 
 某直聘智能求职 Agent — 全自动化求职流水线的 Claude Code Skill。
 
@@ -33,7 +33,7 @@
 
 **1. 自我介绍**
 
-> 我是 **BossHunter**，你的 某直聘智能投递助手。
+> 我是 **JobWinner**，你的 某直聘智能投递助手。
 >
 > 我可以帮你自动完成：搜索岗位 → AI 评分筛选 → 生成个性化招呼语 → 人工确认 → 自动发送 → 监听 HR 回复 → 投递定制简历。
 >
@@ -43,7 +43,7 @@
 
 执行：
 ```bash
-bosshunter web
+jobwinner web
 ```
 
 告知用户：
@@ -68,9 +68,9 @@ bosshunter web
 **4. 配置完成确认**
 
 用户表示配置完成后：
-- 运行 `bosshunter ai-status` 确认 AI API 已连接（不得显示或索要完整 Key）
-- 运行 `bosshunter connect` 确认 Chrome 连接正常
-- 如果连接正常，提示用户可以开始使用（`bosshunter run` 或分步操作）
+- 运行 `jobwinner ai-status` 确认 AI API 已连接（不得显示或索要完整 Key）
+- 运行 `jobwinner connect` 确认 Chrome 连接正常
+- 如果连接正常，提示用户可以开始使用（`jobwinner run` 或分步操作）
 - 如果连接失败，引导开启 Chrome 远程调试并登录 某直聘
 
 ### 如果不是首次使用
@@ -79,13 +79,13 @@ bosshunter web
 
 ## 正式运行前的必备步骤
 
-1. **使用 Google Chrome**：BossHunter 通过 Chrome DevTools Protocol 操作浏览器，不要用 Safari 或其他未连接浏览器替代。
+1. **使用 Google Chrome**：JobWinner 通过 Chrome DevTools Protocol 操作浏览器，不要用 Safari 或其他未连接浏览器替代。
 2. **开启 Chrome 远程调试**：访问 `chrome://inspect/#remote-debugging` 并勾选 Allow remote debugging，或用 `--remote-debugging-port=9222` 启动 Chrome。
 3. **提前登录招聘网站**：必须在已开启远程调试的同一 Chrome 窗口中登录，并在任务期间保持窗口打开。
-4. **连接 AI API**：运行 `bosshunter web`，在本地面板的「AI 设置」中选择服务商、填写 API Key 和模型，然后运行 `bosshunter ai-status`。不得让用户在聊天中发送 Key。
-5. **检查浏览器连接**：运行 `bosshunter connect`。该命令只检测连接，不会代替用户启动 Chrome。
+4. **连接 AI API**：运行 `jobwinner web`，在本地面板的「AI 设置」中选择服务商、填写 API Key 和模型，然后运行 `jobwinner ai-status`。不得让用户在聊天中发送 Key。
+5. **检查浏览器连接**：运行 `jobwinner connect`。该命令只检测连接，不会代替用户启动 Chrome。
 
-只有 AI 和 Chrome 连接都检测通过后，才引导用户运行 `bosshunter run`。
+只有 AI 和 Chrome 连接都检测通过后，才引导用户运行 `jobwinner run`。
 
 ---
 
@@ -98,12 +98,12 @@ bosshunter web
 python --version
 
 # 检查 Chrome CDP 连接
-bosshunter connect
+jobwinner connect
 ```
 
-如果 `bosshunter` 命令不存在，引导用户执行：
+如果 `jobwinner` 命令不存在，引导用户执行：
 ```bash
-cd /path/to/BossHunter && pip install -e .
+cd /path/to/JobWinner && pip install -e .
 ```
 
 如果 Chrome 连接失败，引导用户：
@@ -116,7 +116,7 @@ cd /path/to/BossHunter && pip install -e .
 ### 完整流程（一键模式）
 
 ```bash
-bosshunter run
+jobwinner run
 ```
 
 自动按顺序执行：连接检测 → 采集 → 评分 → 招呼语 → 人工确认 → 发送
@@ -127,25 +127,25 @@ bosshunter run
 
 | 用户意图 | 命令 |
 |---------|------|
-| "帮我搜索/采集岗位" | `bosshunter scrape -k "关键词"` |
-| "评分/筛选一下" | `bosshunter score` |
-| "生成招呼语" | `bosshunter greet` |
-| "确认投递" | `bosshunter confirm` |
-| "发送" | `bosshunter send` |
-| "看看状态/数据" | `bosshunter status --full` |
-| "打开看板" | `bosshunter web` |
-| "连接/检测 AI API" | 打开本地面板配置，完成后运行 `bosshunter ai-status` |
-| "监听回复" | `bosshunter monitor` |
-| "生成简历给xx岗位" | `bosshunter resume --job-id xxx` |
+| "帮我搜索/采集岗位" | `jobwinner scrape -k "关键词"` |
+| "评分/筛选一下" | `jobwinner score` |
+| "生成招呼语" | `jobwinner greet` |
+| "确认投递" | `jobwinner confirm` |
+| "发送" | `jobwinner send` |
+| "看看状态/数据" | `jobwinner status --full` |
+| "打开看板" | `jobwinner web` |
+| "连接/检测 AI API" | 打开本地面板配置，完成后运行 `jobwinner ai-status` |
+| "监听回复" | `jobwinner monitor` |
+| "生成简历给xx岗位" | `jobwinner resume --job-id xxx` |
 
 ### 监听模式
 
 ```bash
 # 持续监听（默认30分钟间隔）
-bosshunter monitor
+jobwinner monitor
 
 # 只检查一次
-bosshunter monitor --once
+jobwinner monitor --once
 ```
 
 监听模式会：
@@ -190,7 +190,7 @@ pending → scored → filtered (AI 过滤)
 配置存放在项目根目录 `config.yaml`，可通过 Web Dashboard 可视化编辑：
 
 ```bash
-bosshunter web  # 打开配置页面
+jobwinner web  # 打开配置页面
 ```
 
 核心配置说明：
@@ -219,13 +219,13 @@ throttle:
 
 ## 数据存储
 
-- SQLite 数据库：`./data/bosshunter.db`
+- SQLite 数据库：`./data/jobwinner.db`
 - 定制简历输出：`./data/resumes/`
 - 历史记录：`./data/history.jsonl`
 
 ## 与 web-access Skill 的关系
 
-BossHunter 依赖 CDP Proxy 进行浏览器操作，其浏览器连接层与 web-access Skill 共享相同的 CDP 连接机制。如果已安装 web-access，两者可共享同一个 Chrome 实例和 Proxy 进程。
+JobWinner 依赖 CDP Proxy 进行浏览器操作，其浏览器连接层与 web-access Skill 共享相同的 CDP 连接机制。如果已安装 web-access，两者可共享同一个 Chrome 实例和 Proxy 进程。
 
 ## 故障排除
 

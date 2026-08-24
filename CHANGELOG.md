@@ -1,4 +1,4 @@
-# BossHunter 更新记录
+# JobWinner 更新记录
 
 这里记录用户可以感知的功能、体验和稳定性变化。版本号与项目当前发布版本保持一致；同一版本内的持续优化按日期分别记录。
 
@@ -57,8 +57,8 @@
 
 ### 贡献者致谢
 
-- [@yukinoshi](https://github.com/yukinoshi)：提交 [#25](https://github.com/powerycy/BossHunter/pull/25)，贡献多 AI 服务兼容与 Thinking 参数等改进思路。
-- [@elowenzhouyb-source](https://github.com/elowenzhouyb-source)：提交 [#27](https://github.com/powerycy/BossHunter/pull/27)，贡献 AI 评分、招呼语与发送可靠性等改进思路。
+- [@yukinoshi](https://github.com/yukinoshi)：提交 [#25](https://github.com/HUliangwei/jobwinner/pull/25)，贡献多 AI 服务兼容与 Thinking 参数等改进思路。
+- [@elowenzhouyb-source](https://github.com/elowenzhouyb-source)：提交 [#27](https://github.com/HUliangwei/jobwinner/pull/27)，贡献 AI 评分、招呼语与发送可靠性等改进思路。
 
 ## 更新说明写作规则
 

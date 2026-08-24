@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 class ResumeArtifactTests(unittest.TestCase):
     def test_prompt_forbids_resume_tailoring_artifacts(self):
-        from bosshunter.ai.resume import RESUME_TAILOR_PROMPT
+        from jobwinner.ai.resume import RESUME_TAILOR_PROMPT
 
         self.assertIn("只输出简历正文", RESUME_TAILOR_PROMPT)
         self.assertIn("不输出任何前言、说明、备注、免责声明", RESUME_TAILOR_PROMPT)
@@ -19,7 +19,7 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertIn("不要输出JD逐条对照", RESUME_TAILOR_PROMPT)
 
     def test_finds_resume_artifact_phrases(self):
-        from bosshunter.ai.resume import _find_resume_artifacts
+        from jobwinner.ai.resume import _find_resume_artifacts
 
         markdown = "以下内容基于原始简历整理。\n\n## 岗位匹配亮点\n- 补充说明：未虚构。"
 
@@ -31,7 +31,7 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertIn("未虚构", artifacts)
 
     def test_finds_expanded_resume_artifact_phrases(self):
-        from bosshunter.ai.resume import _find_resume_artifacts
+        from jobwinner.ai.resume import _find_resume_artifacts
 
         markdown = (
             "以下为优化后的简历。\n"
@@ -51,7 +51,7 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertIn("定制简历", artifacts)
 
     def test_finds_job_tailoring_leakage_phrases(self):
-        from bosshunter.ai.resume import _find_resume_artifacts
+        from jobwinner.ai.resume import _find_resume_artifacts
 
         markdown = (
             "项目与字节岗位中的要求高度相关，可迁移到AI资讯内容质量评估场景，和岗位要求高度匹配。\n"
@@ -71,7 +71,7 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertIn("无法覆盖", artifacts)
 
     def test_existing_source_placeholders_are_allowed_but_new_or_rewritten_ones_are_blocked(self):
-        from bosshunter.ai.resume import _find_new_placeholders
+        from jobwinner.ai.resume import _find_new_placeholders
 
         base_resume = "# 候选人\n\n电话：[待填写]\n作品集：{{portfolio_url}}\n"
 
@@ -91,7 +91,7 @@ class ResumeArtifactTests(unittest.TestCase):
         )
 
     def test_integrity_checks_report_new_and_missing_fact_values(self):
-        from bosshunter.ai.resume import _find_blocking_integrity_issues
+        from jobwinner.ai.resume import _find_blocking_integrity_issues
 
         base_resume = (
             "# 候选人\n\n"
@@ -114,11 +114,11 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertTrue(any("模型新增了原始简历中不存在的数据" in issue for issue in issues))
         self.assertTrue(any("50%" in issue for issue in issues))
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_blocking_validation_failure_is_returned_to_monitor(self, get_db, call_claude, render_pdf):
-        from bosshunter.ai.resume import (
+        from jobwinner.ai.resume import (
             RESUME_COMPLETION_MARKER,
             generate_tailored_resume,
             get_last_resume_failure_reason,
@@ -169,11 +169,11 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertEqual(call_claude.call_count, 2)
         render_pdf.assert_not_called()
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_dirty_resume_output_is_still_written_for_user_review(self, get_db, call_claude, render_pdf):
-        from bosshunter.ai.resume import generate_tailored_resume
+        from jobwinner.ai.resume import generate_tailored_resume
 
         db = Mock()
         db.execute.return_value.fetchone.return_value = {
@@ -209,11 +209,11 @@ class ResumeArtifactTests(unittest.TestCase):
 
         render_pdf.assert_called_once()
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_incomplete_resume_output_is_still_written_for_user_review(self, get_db, call_claude, render_pdf):
-        from bosshunter.ai.resume import generate_tailored_resume
+        from jobwinner.ai.resume import generate_tailored_resume
 
         db = Mock()
         db.execute.return_value.fetchone.return_value = {
@@ -252,11 +252,11 @@ class ResumeArtifactTests(unittest.TestCase):
 
         render_pdf.assert_called_once()
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_completed_resume_marker_is_removed_before_writing(self, get_db, call_claude, render_pdf):
-        from bosshunter.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
+        from jobwinner.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
 
         db = Mock()
         db.execute.return_value.fetchone.return_value = {
@@ -307,13 +307,13 @@ class ResumeArtifactTests(unittest.TestCase):
             self.assertNotIn(RESUME_COMPLETION_MARKER, saved_md)
             self.assertIn("AI科技内容传播、媒体关系和品牌传播经验", saved_md)
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_nearly_unchanged_resume_output_is_still_written_for_user_review(
         self, get_db, call_claude, render_pdf
     ):
-        from bosshunter.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
+        from jobwinner.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
 
         db = Mock()
         db.execute.return_value.fetchone.return_value = {
@@ -362,13 +362,13 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertEqual(call_claude.call_count, 1)
         render_pdf.assert_called_once()
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_overlong_resume_output_is_saved_after_compression_retry_still_exceeds_limit(
         self, get_db, call_claude, render_pdf
     ):
-        from bosshunter.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
+        from jobwinner.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
 
         db = Mock()
         db.execute.return_value.fetchone.return_value = {
@@ -424,11 +424,11 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertEqual(call_claude.call_count, 2)
         render_pdf.assert_called_once()
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_overlong_resume_output_is_retried_with_compression_instruction(self, get_db, call_claude, render_pdf):
-        from bosshunter.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
+        from jobwinner.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
 
         db = Mock()
         db.execute.return_value.fetchone.return_value = {
@@ -502,11 +502,11 @@ class ResumeArtifactTests(unittest.TestCase):
         self.assertIn("简历内容过长", retry_prompt)
         self.assertIn("必须压缩到", retry_prompt)
 
-    @patch("bosshunter.ai.resume._render_pdf")
-    @patch("bosshunter.ai.resume._call_claude")
-    @patch("bosshunter.ai.resume.get_db")
+    @patch("jobwinner.ai.resume._render_pdf")
+    @patch("jobwinner.ai.resume._call_claude")
+    @patch("jobwinner.ai.resume.get_db")
     def test_pdf_over_page_limit_is_kept_and_marked_ready(self, get_db, call_claude, render_pdf):
-        from bosshunter.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
+        from jobwinner.ai.resume import RESUME_COMPLETION_MARKER, generate_tailored_resume
 
         db = Mock()
         db.execute.return_value.fetchone.return_value = {
@@ -575,11 +575,11 @@ class ResumeArtifactTests(unittest.TestCase):
 
 
 class ResumePdfRuntimeTests(unittest.TestCase):
-    @patch("bosshunter.ai.resume.close_tab")
-    @patch("bosshunter.ai.resume.print_pdf")
-    @patch("bosshunter.ai.resume.new_tab")
+    @patch("jobwinner.ai.resume.close_tab")
+    @patch("jobwinner.ai.resume.print_pdf")
+    @patch("jobwinner.ai.resume.new_tab")
     def test_render_pdf_via_cdp_uses_browser_facade(self, new_tab, print_pdf, close_tab):
-        from bosshunter.ai.resume import _render_pdf_via_cdp
+        from jobwinner.ai.resume import _render_pdf_via_cdp
 
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "resume.pdf"
@@ -595,11 +595,11 @@ class ResumePdfRuntimeTests(unittest.TestCase):
         print_pdf.assert_called_once_with("target-1", output)
         close_tab.assert_called_once_with("target-1")
 
-    @patch("bosshunter.ai.resume.close_tab")
-    @patch("bosshunter.ai.resume.print_pdf")
-    @patch("bosshunter.ai.resume.new_tab")
+    @patch("jobwinner.ai.resume.close_tab")
+    @patch("jobwinner.ai.resume.print_pdf")
+    @patch("jobwinner.ai.resume.new_tab")
     def test_render_pdf_via_cdp_rejects_missing_output_file(self, new_tab, print_pdf, close_tab):
-        from bosshunter.ai.resume import _render_pdf_via_cdp
+        from jobwinner.ai.resume import _render_pdf_via_cdp
 
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "missing.pdf"

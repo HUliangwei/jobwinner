@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from bosshunter.executor import portal_tracker
-from bosshunter.executor.portal_tracker import (
+from jobwinner.executor import portal_tracker
+from jobwinner.executor.portal_tracker import (
     DEFAULT_PORTAL_COOLDOWN_MINUTES,
     check_portal_progress,
 )
@@ -21,9 +21,9 @@ class PortalCooldownTests(unittest.TestCase):
 
     def _make_db(self, tmp: Path, urls: list[str]):
         """Create a temp DB with portal jobs; return the DB connection."""
-        from bosshunter.db import get_db, insert_job
+        from jobwinner.db import get_db, insert_job
 
-        db_path = tmp / "data" / "bosshunter.db"
+        db_path = tmp / "data" / "jobwinner.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         db = get_db(db_path)
         for i, url in enumerate(urls):
@@ -51,7 +51,7 @@ class PortalCooldownTests(unittest.TestCase):
         db.commit()
         return db, db_path
 
-    @patch("bosshunter.executor.portal_tracker.check_single_record_page")
+    @patch("jobwinner.executor.portal_tracker.check_single_record_page")
     def test_first_check_runs_pages(self, mock_check):
         """第一次巡检（无上次记录）应真正执行并打开页面。"""
         mock_check.return_value = {"ok": True, "url": "https://x.com/deliveryRecord", "title": "", "text": "岗位0 简历初筛-未处理"}
@@ -62,7 +62,7 @@ class PortalCooldownTests(unittest.TestCase):
         self.assertEqual(result["checked"], 1)
         mock_check.assert_called_once()
 
-    @patch("bosshunter.executor.portal_tracker.check_single_record_page")
+    @patch("jobwinner.executor.portal_tracker.check_single_record_page")
     def test_cooldown_skips_second_call(self, mock_check):
         """刚巡检过，冷却期内第二次非强制调用应跳过（不打开页面）。"""
         mock_check.return_value = {"ok": True, "url": "https://x.com/deliveryRecord", "title": "", "text": "岗位0 简历初筛-未处理"}
@@ -77,7 +77,7 @@ class PortalCooldownTests(unittest.TestCase):
         # 只真正打开过一次页面
         self.assertEqual(mock_check.call_count, 1)
 
-    @patch("bosshunter.executor.portal_tracker.check_single_record_page")
+    @patch("jobwinner.executor.portal_tracker.check_single_record_page")
     def test_force_bypasses_cooldown(self, mock_check):
         """force=True 时即使冷却期内也应真正执行。"""
         mock_check.return_value = {"ok": True, "url": "https://x.com/deliveryRecord", "title": "", "text": "岗位0 简历初筛-未处理"}
@@ -89,7 +89,7 @@ class PortalCooldownTests(unittest.TestCase):
             db.close()
         self.assertEqual(mock_check.call_count, 2)
 
-    @patch("bosshunter.executor.portal_tracker.check_single_record_page")
+    @patch("jobwinner.executor.portal_tracker.check_single_record_page")
     def test_zero_cooldown_always_checks(self, mock_check):
         """cooldown_minutes=0 表示不冷却，每次都执行。"""
         mock_check.return_value = {"ok": True, "url": "https://x.com/deliveryRecord", "title": "", "text": "岗位0 简历初筛-未处理"}

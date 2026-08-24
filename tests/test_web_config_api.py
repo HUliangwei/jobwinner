@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import yaml
 
-from bosshunter.web import server
+from jobwinner.web import server
 
 
 class WebConfigApiTests(unittest.TestCase):
