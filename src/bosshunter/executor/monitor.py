@@ -18,10 +18,29 @@ from bosshunter.db import (
     update_job_status, add_history,
 )
 from bosshunter.throttle import RequestThrottle, SendWindowChecker
+from bosshunter.browser_lock import BrowserPriority, platform_browser_lock
 
 console = Console()
 
 PORTFOLIO_URL = None  # Set via config: profile.portfolio_url
+
+
+def _browser_locked(platform: str, priority: int):
+    """装饰器：把函数的浏览器操作纳入指定平台/优先级锁。
+
+    监测中的对话操作（打开对话、发自动回复、发简历）都驱动同一个 Chrome，
+    必须与采集/发送共享平台锁。监测是低优先级，发送/采集持锁时它排队；
+    它持锁时发送可插队。
+    """
+    import functools
+
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            with platform_browser_lock(platform).context(priority):
+                return fn(*args, **kwargs)
+        return wrapper
+    return deco
 
 # JS: Extract chat list with full message context
 JS_EXTRACT_CHAT_LIST = """
@@ -494,6 +513,7 @@ def _send_message_in_chat(target_id: str, message: str) -> bool:
         return False
 
 
+@_browser_locked("boss", BrowserPriority.MONITOR)
 def _open_conversation(job: dict, config: dict) -> str | None:
     """Open a conversation with HR. Returns target_id or None.
 
@@ -751,28 +771,30 @@ def check_replies(config: dict) -> list[dict]:
 
     console.print(f"[bold]监测 {len(all_tracked_jobs)} 个对话的回复情况...[/bold]")
 
-    # Open chat page
-    target_id = new_tab(chat_url, background=True)
-    if not target_id:
-        console.print("[red]无法打开聊天页面[/red]")
-        db.close()
-        return []
+    # Open chat page. 监测读聊天列表也操作浏览器，纳入平台锁（低优先级，
+    # 发送/采集持锁时它排队；它持锁时发送可插队）。
+    with platform_browser_lock("boss").context(BrowserPriority.MONITOR):
+        target_id = new_tab(chat_url, background=True)
+        if not target_id:
+            console.print("[red]无法打开聊天页面[/red]")
+            db.close()
+            return []
 
-    if _wait_or_stop(config, 3) or not _wait_for_page_or_stop(target_id, config, timeout=10):
-        close_tab(target_id)
-        db.close()
-        return []
-    if _wait_or_stop(config, 2):
-        close_tab(target_id)
-        db.close()
-        return []
+        if _wait_or_stop(config, 3) or not _wait_for_page_or_stop(target_id, config, timeout=10):
+            close_tab(target_id)
+            db.close()
+            return []
+        if _wait_or_stop(config, 2):
+            close_tab(target_id)
+            db.close()
+            return []
 
-    # Extract chat list
-    raw = evaluate(target_id, JS_EXTRACT_CHAT_LIST)
-    close_tab(target_id)
-    if stop_requested(config):
-        db.close()
-        return []
+        # Extract chat list
+        raw = evaluate(target_id, JS_EXTRACT_CHAT_LIST)
+        close_tab(target_id)
+        if stop_requested(config):
+            db.close()
+            return []
 
     if not raw:
         console.print("[yellow]未能获取聊天列表[/yellow]")
@@ -861,6 +883,7 @@ def _match_conversation_to_job(conv: dict, jobs: list[dict]) -> dict | None:
     return None
 
 
+@_browser_locked("boss", BrowserPriority.MONITOR)
 def _handle_conversation(job: dict, config: dict) -> str:
     """Handle a single conversation that has an HR reply.
 

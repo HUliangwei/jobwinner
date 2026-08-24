@@ -6,7 +6,7 @@ import re
 import time
 import hashlib
 from typing import Callable
-from bosshunter.browser_lock import BROWSER_LOCK
+from bosshunter.browser_lock import BrowserPriority, platform_browser_lock
 from urllib.parse import quote
 
 from rich.console import Console
@@ -238,7 +238,7 @@ def scrape_jobs(
                 if page > 1:
                     search_url += f"&page={page}"
 
-                with BROWSER_LOCK:
+                with platform_browser_lock("boss").context(BrowserPriority.COLLECT):
                     # Open the first search page in the current window foreground
                     # so the user can see collect starting in Chrome; subsequent
                     # pages open in the background to avoid stealing focus.
@@ -310,25 +310,28 @@ def scrape_jobs(
                     if matching_blocked_company(job_data.get("company", ""), blocked_companies):
                         continue
 
-                    # Open detail page for full JD
+                    # Open detail page for full JD. 详情页的浏览器操作（开 tab →
+                    # 等待加载 → 提取 → 关闭）也要走平台锁，否则它会和发送/监测
+                    # 并发操作同一个 Chrome，破坏页面状态。锁粒度为单条详情。
                     if throttle.wait(stop_event):
                         break
                     detail_url = f"https://www.zhipin.com{job_url}"
-                    detail_target = new_tab(detail_url, background=True)
-                    if not detail_target:
-                        continue
+                    with platform_browser_lock("boss").context(BrowserPriority.COLLECT):
+                        detail_target = new_tab(detail_url, background=True)
+                        if not detail_target:
+                            continue
 
-                    if _wait_or_stop(stop_event, 2):
-                        close_tab(detail_target)
-                        break
-                    wait_for_load(detail_target, timeout=10)
-                    if stop_event is not None and stop_event.is_set():
-                        close_tab(detail_target)
-                        break
+                        if _wait_or_stop(stop_event, 2):
+                            close_tab(detail_target)
+                            break
+                        wait_for_load(detail_target, timeout=10)
+                        if stop_event is not None and stop_event.is_set():
+                            close_tab(detail_target)
+                            break
 
-                    # Extract detail
-                    detail_result = evaluate(detail_target, JS_EXTRACT_DETAIL)
-                    close_tab(detail_target)
+                        # Extract detail
+                        detail_result = evaluate(detail_target, JS_EXTRACT_DETAIL)
+                        close_tab(detail_target)
 
                     if not detail_result:
                         continue

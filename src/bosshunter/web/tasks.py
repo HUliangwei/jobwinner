@@ -11,9 +11,6 @@ import traceback
 
 from bosshunter.throttle import SendWindowChecker
 
-
-from bosshunter.browser_lock import BROWSER_LOCK
-
 # Parallelism model: every mode is its own group so collect/score/monitor/
 # deliver can all run concurrently and independently. Same-mode is mutually
 # exclusive; full bundles everything and stays exclusive with all modes.

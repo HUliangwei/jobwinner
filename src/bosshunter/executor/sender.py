@@ -19,7 +19,7 @@ from bosshunter.browser import (
 )
 from bosshunter.db import get_db, get_jobs_ready_to_send, update_job_status, add_history, add_risk_event
 from bosshunter.throttle import RequestThrottle, SendWindowChecker, ProgressiveBackoff, should_take_day_off
-from bosshunter.browser_lock import BROWSER_LOCK
+from bosshunter.browser_lock import BrowserPriority, platform_browser_lock
 
 console = Console()
 
@@ -685,7 +685,9 @@ def _send_greeting_once(
     phase_callback=None,
 ) -> tuple[dict, str | None]:
     # Serialize browser-level operations across parallel workbench tasks.
-    with BROWSER_LOCK:
+    # 发送是最高优先级浏览器操作（写岗位页/发消息最敏感），
+    # 平台锁会让它在采集/监测之前插队。
+    with platform_browser_lock("boss").context(BrowserPriority.DELIVER):
         return _send_greeting_once_locked(job, greeting, throttle_config, phase_callback)
 
 
