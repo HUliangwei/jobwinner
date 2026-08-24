@@ -13,6 +13,7 @@ import re
 import sqlite3
 import time
 import uuid
+from threading import Lock
 
 
 # 官网状态文本 → 看板 stage 映射（按优先级匹配：具体先于通用）
@@ -32,6 +33,30 @@ LOGIN_REDIRECT_MARKERS = (
     "passport",
     "sso",
 )
+
+# 全局巡检冷却：多个触发源（面板启动 / 监测每轮 / CLI）都会调用巡检，
+# 如果每次都真正打开页面，恒玄等官网会被反复访问。这里统一记一个
+# 「上次真正执行巡检」的时间戳，非强制调用在冷却期内直接跳过，
+# 让所有触发源合并成「最多每 N 分钟真正打开一次页面」。
+_COOLDOWN_LOCK = Lock()
+_LAST_CHECK_TS = 0.0
+DEFAULT_PORTAL_COOLDOWN_MINUTES = 30
+
+
+def _should_skip_due_to_cooldown(cooldown_minutes: int) -> bool:
+    """Return True when a non-forced check is still inside the cooldown window."""
+    global _LAST_CHECK_TS
+    with _COOLDOWN_LOCK:
+        if cooldown_minutes <= 0 or _LAST_CHECK_TS <= 0:
+            return False
+        return (time.time() - _LAST_CHECK_TS) < cooldown_minutes * 60
+
+
+def _mark_checked_now() -> None:
+    """Record that a real portal check just ran."""
+    global _LAST_CHECK_TS
+    with _COOLDOWN_LOCK:
+        _LAST_CHECK_TS = time.time()
 
 
 def _parse_stage_detail(text: str) -> tuple[str | None, str | None]:
@@ -166,11 +191,13 @@ def check_single_record_page(
                 else:
                     data = {}
                 text = data.get("text", "") or ""
-                if len(text) >= 300:
+                # 阈值提高到 800 字符、稳定轮数 3 轮，避免恒玄等 SPA 页面
+                # 在内容还没加载完时就被认为"已稳定"而提前退出。
+                if len(text) >= 800:
                     break
                 if len(text) == prev_len:
                     stable_rounds += 1
-                    if stable_rounds >= 2:
+                    if stable_rounds >= 3:
                         break
                 else:
                     stable_rounds = 0
@@ -249,6 +276,8 @@ def check_portal_progress(
     wait_seconds: int = 6,
     log=None,
     db_conn: sqlite3.Connection | None = None,
+    force: bool = False,
+    cooldown_minutes: int | None = None,
 ) -> dict:
     """巡检所有 portal 岗位的官网投递记录页，检测并写回 stage。
 
@@ -256,12 +285,24 @@ def check_portal_progress(
     - 按 url 去重（同一官网记录页只开一次），解析页面文本 → 每页一次。
     - 对每个岗位：若其官网记录 url 命中了该页文本中的某个状态词，则尝试更新 stage。
     - 未登录 / 打开失败的页面跳过。
+
+    冷却：多个触发源（面板启动 / 监测每轮 / CLI）都会调用，若不希望每次
+    都真正打开官网页面，可设置 cooldown_minutes（默认 30 分钟）。冷却期内
+    的非强制调用会直接返回 skipped，避免恒玄等官网被反复访问。
+    - force=True（如用户手动 CLI 巡检）→ 总是真正执行，绕过冷却。
+    - cooldown_minutes=None → 使用 DEFAULT_PORTAL_COOLDOWN_MINUTES。
     """
     from bosshunter.db import get_db
 
     def emit(msg: str) -> None:
         if callable(log):
             log(msg)
+
+    # 冷却检查：非强制调用在冷却期内直接跳过，避免恒玄等官网被反复访问。
+    cooldown = DEFAULT_PORTAL_COOLDOWN_MINUTES if cooldown_minutes is None else cooldown_minutes
+    if not force and _should_skip_due_to_cooldown(cooldown):
+        emit(f"官网巡检：冷却期内跳过（距上次巡检不足 {cooldown} 分钟，手动巡检用 --force 强制执行）")
+        return {"checked": 0, "updated": 0, "skipped": 0, "notes": ["cooldown_skipped"]}
 
     local = db_conn is None
     db = db_conn or get_db()
@@ -289,6 +330,8 @@ def check_portal_progress(
         emit("官网巡检：无可巡检的投递记录页（已登录官网并提供记录页链接后生效）")
         return {"checked": 0, "updated": 0, "skipped": 0, "notes": ["no_record_urls"]}
 
+    # 真正要打开页面了，记录时间（下次冷却检查以此为准）
+    _mark_checked_now()
     emit(f"官网巡检：发现 {len(record_urls)} 个官网投递记录页待检查")
     updated: list[str] = []
     skipped: list[str] = []

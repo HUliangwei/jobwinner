@@ -256,7 +256,8 @@ def check_portal(ctx: click.Context, wait: int) -> None:
         msgs.append(m)
         console.print(f"  {m}")
 
-    result = check_portal_progress(log=log, wait_seconds=wait)
+    # 手动 CLI 巡检 = 用户主动要求，绕过冷却强制真正执行
+    result = check_portal_progress(log=log, wait_seconds=wait, force=True)
     updated = result.get("updated", 0)
     checked = result.get("checked", 0)
     if updated:
