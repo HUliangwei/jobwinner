@@ -5,12 +5,12 @@
 > 某直聘智能求职 Agent — 从岗位采集、AI 评分到人工确认投递、回复监测与定制简历生成的本地自动化流水线
 
 <p align="center">
-  <a href="https://github.com/HUliangwei/jobwinner/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/powerycy/JobWinner?style=social"></a>
+  <a href="https://github.com/HUliangwei/jobwinner/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/HUliangwei/jobwinner?style=social"></a>
   <a href="https://github.com/HUliangwei/jobwinner"><img alt="Version" src="https://img.shields.io/badge/version-v2.3.0-FB6511"></a>
   <a href="https://www.python.org/"><img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="LICENSE"><img alt="Non-Commercial License" src="https://img.shields.io/badge/license-Non--Commercial-6f42c1"></a>
-  <a href="https://github.com/HUliangwei/jobwinner/issues"><img alt="GitHub Issues" src="https://img.shields.io/github/issues/powerycy/JobWinner"></a>
-  <a href="https://github.com/HUliangwei/jobwinner/commits/main"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/powerycy/JobWinner"></a>
+  <a href="https://github.com/HUliangwei/jobwinner/issues"><img alt="GitHub Issues" src="https://img.shields.io/github/issues/HUliangwei/jobwinner"></a>
+  <a href="https://github.com/HUliangwei/jobwinner/commits/main"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/HUliangwei/jobwinner"></a>
 </p>
 
 <p align="center">
@@ -44,6 +44,24 @@
 ### 产品介绍 PPT
 
 ![JobWinner 产品介绍 PPT](docs/demo/bossHunter-product-intro.gif)
+
+---
+## 🙏 参考与致谢
+
+本项目由 **[BossHunter](https://github.com/powerycy/BossHunter)（作者 [powerycy](https://github.com/powerycy)）** 改良而来，在此向其原作者与社区贡献者致以诚挚谢意。
+
+**JobWinner 与 BossHunter 的关系：**
+- **参考基线**：以 BossHunter v2.3.0（upstream main, 2026-08-18）为代码与产品设计基线。
+- **改良方向**：在保留原项目「AI 评分 + 人工确认」核心流水线的基础上，新增/重构了以下能力——
+  - 全新**工作台并行任务**：采集 / 评分 / 挂机监测 / 发送可同时运行，互相独立
+  - **流水线模式**：采集 → 评分 → 招呼语 → 确认 → 发送一键串接，实时进度展示
+  - **多简历管理**：支持多份定制简历上传与按岗位选择投递
+  - **官网投递进度巡检**：自动同步各企业官网招聘页的投递状态到看板
+  - **登录管理页**：集中管理 BOSS 直聘等平台登录态
+  - 防封增强：浏览器访问按平台分锁 + 按环节优先级排队；节流器全局化；发送失败自动重试开关
+- **数据与运行时兼容**：保留原有数据文件迁移与浏览器运行时协议，升级无痛。
+
+再次感谢 **powerycy 与 BossHunter 的全体贡献者** 🌟
 
 ---
 
