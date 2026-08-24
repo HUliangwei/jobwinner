@@ -49,10 +49,12 @@ interface WorkbenchTask {
   status: string
   logs: string[]
   error?: string
+  traceback?: string
   deadline_at?: string
   stop_reason?: string
   stop_requested: boolean
   metrics?: Record<string, number>
+  sending_job_ids?: string[]
 }
 
 interface WorkbenchData {
@@ -64,7 +66,9 @@ interface WorkbenchData {
   needs_resume: Job[]
   resume_pending: Job[]
   task: WorkbenchTask | null
+  active_tasks: WorkbenchTask[]
   last_task: WorkbenchTask | null
+  send_window?: { windows: string[]; active: boolean; next: string }
 }
 
 interface HistoryDetailPayload {
@@ -100,7 +104,9 @@ const emptyWorkbench: WorkbenchData = {
   needs_resume: [],
   resume_pending: [],
   task: null,
+  active_tasks: [],
   last_task: null,
+  send_window: undefined,
 }
 
 type DashboardDataScope = 'workbench' | 'jobs' | 'monitor' | 'all'

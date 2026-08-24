@@ -399,7 +399,7 @@ def resolve_anthropic_model(model: str, config: dict) -> str:
         headers["x-api-key"] = api_key
 
     try:
-        response = httpx.get(f"{base_url.rstrip('/')}/v1/models", headers=headers, timeout=10)
+        response = httpx.get(f"{base_url.rstrip('/')}/v1/models", headers=headers, timeout=10, trust_env=False)
         response.raise_for_status()
         model_ids = [item.get("id", "") for item in response.json().get("data", [])]
     except Exception:
@@ -516,6 +516,7 @@ def call_openai_compatible_text(
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
                 timeout=request_timeout,
+                trust_env=False,
             )
             response.raise_for_status()
         except Exception as exc:

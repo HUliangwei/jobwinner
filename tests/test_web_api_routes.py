@@ -579,7 +579,7 @@ class WebApiRouteTests(unittest.TestCase):
             base_dir = Path(tmp)
             db = get_db(base_dir / "data" / "bosshunter.db")
             try:
-                now = datetime.now(UTC).replace(tzinfo=None)
+                now = datetime.now().replace(microsecond=0)
                 fixtures = (
                     ("today-ready", "ready", now),
                     ("today-sent", "sent", now - timedelta(hours=1)),
@@ -671,14 +671,16 @@ class WebApiRouteTests(unittest.TestCase):
         self.assertTrue(started.wait(timeout=1))
 
         try:
-            # Act
+            # Act: stopping keeps the same-mode slot busy, but different modes
+            # (monitor) can already start concurrently.
             stopped = runner.stop(task["id"])
             status_after_stop = runner.status()
             with self.assertRaises(TaskAlreadyRunningError):
-                runner.start("monitor", {})
+                runner.start("collect", {})
+            concurrent = runner.start("monitor", {})
             release.set()
             runner.wait(timeout=1)
-            second_task = runner.start("monitor", {})
+            runner.stop(concurrent["id"])
             runner.wait(timeout=1)
         finally:
             release.set()
@@ -688,7 +690,7 @@ class WebApiRouteTests(unittest.TestCase):
         self.assertEqual(stopped["status"], "stopping")
         self.assertEqual(status_after_stop["active"]["id"], task["id"])
         self.assertEqual(status_after_stop["active"]["status"], "stopping")
-        self.assertEqual(second_task["mode"], "monitor")
+        self.assertEqual(concurrent["mode"], "monitor")
 
     def test_task_stop_wakes_monitor_interval_wait(self):
         # Arrange
@@ -1853,6 +1855,17 @@ class WebApiRouteTests(unittest.TestCase):
         self.assertTrue(resolved_item["resolved"])
         self.assertEqual(resolved_item["resume_path"], "/tmp/generated.md")
 
+
+    def test_greeting_polish_endpoint_returns_polished_text(self):
+        with patch("bosshunter.ai.greeter.polish_greeting", return_value="你好，我在读研。"):
+            status, _, body = self._request("/api/greeting/polish", method="POST", json_body={"greeting": "你好我在读研"})
+        payload = json.loads(body)
+        self.assertTrue(status.startswith("200"), body)
+        self.assertEqual(payload["polished"], "你好，我在读研。")
+
+    def test_greeting_polish_endpoint_rejects_empty(self):
+        status, _, body = self._request("/api/greeting/polish", method="POST", json_body={"greeting": "  "})
+        self.assertTrue(status.startswith("400"), body)
 
 if __name__ == "__main__":
     unittest.main()

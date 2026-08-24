@@ -408,10 +408,12 @@ class DashboardPageTests(unittest.TestCase):
         self.assertIn("refreshing && 'animate-spin'", self.source)
 
     def test_dashboard_can_stop_after_start_response_arrives(self):
-        active_branch = self.source.index("if (activeTask?.mode === mode)")
+        # 停止分支必须优先于 modePending 守卫：点击运行中的任务先走停止，
+        # 新逻辑遍历 activeTasks（支持并行），不再只看单个 activeTask
+        stop_branch = self.source.index("const runningForMode = activeTasks.find(t => t.mode === mode")
         pending_guard = self.source.index("if (modePending) return")
 
-        self.assertLess(active_branch, pending_guard)
+        self.assertLess(stop_branch, pending_guard)
 
     def test_dashboard_refresh_prevents_overlapping_requests(self):
         hook_source = (
@@ -431,7 +433,7 @@ class DashboardPageTests(unittest.TestCase):
 
     def test_dashboard_filters_today_jobs_and_clears_hidden_selection(self):
         self.assertIn("filteredTodayJobs", self.source)
-        self.assertIn("setSelected(filteredTodayJobs.map(job => job.id))", self.source)
+        self.assertIn("[...filteredTodayJobs.map(job => job.id), ...pendingGreetingJobs.map(job => job.id)]", self.source)
         self.assertIn("visibleJobIds.has(id)", self.source)
         self.assertIn("没有符合当前条件的岗位", self.source)
 
@@ -550,8 +552,10 @@ class DashboardPageTests(unittest.TestCase):
             "workbench.pending_greetings.filter(job => !confirmedDeliveryIds.has(job.id))",
             self.source,
         )
-        self.assertIn("rejectSelectedJobs(pendingGreetingJobs.map(job => job.id))", self.source)
-        pending_section = self.source[self.source.index("待发送招呼语"):]
+        # Greeting-ready jobs join the unified selection: each card has a checkbox,
+        # and the top bar can batch-reject or batch-deliver the selection.
+        self.assertIn("toggleJob(job.id)}", self.source)
+        pending_section = self.source[self.source.index("已生成招呼语（勾选后"):]
         self.assertIn("rejectSelectedJobs([job.id])", pending_section)
         self.assertIn(">放弃</Button>", pending_section)
 
@@ -609,8 +613,9 @@ class DashboardPageTests(unittest.TestCase):
 
     def test_dashboard_shows_automatic_task_deadline_and_stop_reason(self):
         self.assertIn("自动截止：", self.source)
-        self.assertIn("visibleTask.deadline_at", self.source)
-        self.assertIn("visibleTask.stop_reason", self.source)
+        self.assertIn("task.deadline_at", self.source)
+        self.assertIn("task.stop_reason", self.source)
+        self.assertIn("statusTasks.map(task =>", self.source)
 
 
 class SidebarTests(unittest.TestCase):

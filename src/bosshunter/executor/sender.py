@@ -19,6 +19,7 @@ from bosshunter.browser import (
 )
 from bosshunter.db import get_db, get_jobs_ready_to_send, update_job_status, add_history, add_risk_event
 from bosshunter.throttle import RequestThrottle, SendWindowChecker, ProgressiveBackoff, should_take_day_off
+from bosshunter.browser_lock import BROWSER_LOCK
 
 console = Console()
 
@@ -677,7 +678,23 @@ JS_SEND_GREETING = """
 """
 
 
-def _send_greeting_once(job: dict, greeting: str, throttle_config: dict) -> tuple[dict, str | None]:
+def _send_greeting_once(
+    job: dict,
+    greeting: str,
+    throttle_config: dict,
+    phase_callback=None,
+) -> tuple[dict, str | None]:
+    # Serialize browser-level operations across parallel workbench tasks.
+    with BROWSER_LOCK:
+        return _send_greeting_once_locked(job, greeting, throttle_config, phase_callback)
+
+
+def _send_greeting_once_locked(
+    job: dict,
+    greeting: str,
+    throttle_config: dict,
+    phase_callback=None,
+) -> tuple[dict, str | None]:
     stop_event = throttle_config.get("_workbench_stop_event")
     existing_target_ids = {
         str(target.get("targetId") or "")
@@ -697,9 +714,19 @@ def _send_greeting_once(job: dict, greeting: str, throttle_config: dict) -> tupl
     if throttle_config.get("browse_before_greet", True):
         import random
         browse_time = random.uniform(browse_min, browse_max)
+        if phase_callback:
+            try:
+                phase_callback(job, "browsing", {"browse_seconds": browse_time})
+            except Exception:
+                pass
         if _sleep_or_stop(browse_time, stop_event):
             close_tab(target_id)
             return {"success": False, "error": "stopped", "history_detail": "用户已请求停止", "skip_backoff": True}, None
+        if phase_callback:
+            try:
+                phase_callback(job, "browsed", {})
+            except Exception:
+                pass
 
     page_check_js = """
     (() => {
@@ -991,6 +1018,25 @@ def send_greetings(config: dict, force: bool = False) -> int:
     throttle = RequestThrottle(delay_min=interval_min, delay_max=interval_max)
     backoff = ProgressiveBackoff()
     sent_count = 0
+    progress_callback = config.get("_workbench_send_progress")
+
+    def report_send_progress(job: dict | None = None, phase: str = "sending") -> None:
+        """Push live send progress to the workbench task (frontend status card)."""
+        if not callable(progress_callback):
+            return
+        try:
+            progress_callback({
+                "done": sent_count + send_report.get("failed_count", 0),
+                "sent": sent_count,
+                "failed": send_report.get("failed_count", 0),
+                "total": len(jobs_to_send),
+                "phase": phase,
+                "current_company": (job or {}).get("company", ""),
+                "current_title": (job or {}).get("title", ""),
+            })
+        except Exception:
+            # Progress reporting must never break the send loop
+            pass
 
     console.print(f"[bold]准备发送 {len(jobs_to_send)} 条招呼语[/bold] (今日已发 {already_sent}/{daily_limit})")
 
@@ -1026,15 +1072,29 @@ def send_greetings(config: dict, force: bool = False) -> int:
                     break
 
             progress.update(task, description=f"发送: {job['company'][:10]} - {job['title'][:15]}")
+            report_send_progress(job, "opening")
 
-            result_data, failed_target_id = _send_greeting_once(job, greeting, throttle_config)
+            def job_phase_cb(job_info: dict, phase: str, extra: dict | None = None) -> None:
+                # 浏览中 → 前端横幅显示“模拟浏览中”；浏览完进入输入发送
+                if phase == "browsing":
+                    report_send_progress(job_info, "browsing")
+                elif phase == "browsed":
+                    report_send_progress(job_info, "sending")
+
+            result_data, failed_target_id = _send_greeting_once(
+                job, greeting, throttle_config,
+                phase_callback=job_phase_cb,
+            )
             if result_data.get("error") == "stopped":
                 send_report["stop_reason"] = "stopped"
                 break
             if result_data.get("error") == "no_chat_input" and failed_target_id:
                 console.print("[yellow]    ! 未进入具体聊天会话，重新打开岗位页再试一次[/yellow]")
                 close_tab(failed_target_id)
-                result_data, failed_target_id = _send_greeting_once(job, greeting, throttle_config)
+                result_data, failed_target_id = _send_greeting_once(
+                    job, greeting, throttle_config,
+                    phase_callback=job_phase_cb,
+                )
                 if result_data.get("error") == "stopped":
                     send_report["stop_reason"] = "stopped"
                     break

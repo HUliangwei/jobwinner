@@ -6,6 +6,7 @@ import re
 import time
 import hashlib
 from typing import Callable
+from bosshunter.browser_lock import BROWSER_LOCK
 from urllib.parse import quote
 
 from rich.console import Console
@@ -237,42 +238,45 @@ def scrape_jobs(
                 if page > 1:
                     search_url += f"&page={page}"
 
-                # Open search page
-                target_id = new_tab(search_url, background=True)
-                if not target_id:
-                    if page == 1:
-                        progress.update(task, description=f"[red]✗ 无法打开搜索页: {label}[/red]")
-                    break
+                with BROWSER_LOCK:
+                    # Open the first search page in the current window foreground
+                    # so the user can see collect starting in Chrome; subsequent
+                    # pages open in the background to avoid stealing focus.
+                    target_id = new_tab(search_url, background=(page > 1))
+                    if not target_id:
+                        if page == 1:
+                            progress.update(task, description=f"[red]✗ 无法打开搜索页: {label}[/red]")
+                        break
 
-                if _wait_or_stop(stop_event, 3):
-                    close_tab(target_id)
-                    break
-                wait_for_load(target_id, timeout=10)
-                if stop_event is not None and stop_event.is_set():
-                    close_tab(target_id)
-                    break
+                    if _wait_or_stop(stop_event, 3):
+                        close_tab(target_id)
+                        break
+                    wait_for_load(target_id, timeout=10)
+                    if stop_event is not None and stop_event.is_set():
+                        close_tab(target_id)
+                        break
 
-                # Scroll to load all results on this page
-                scroll(target_id, y=2000)
-                if _wait_or_stop(stop_event, 1.5):
-                    close_tab(target_id)
-                    break
-                scroll(target_id, y=4000)
-                if _wait_or_stop(stop_event, 1.5):
-                    close_tab(target_id)
-                    break
+                    # Scroll to load all results on this page
+                    scroll(target_id, y=2000)
+                    if _wait_or_stop(stop_event, 1.5):
+                        close_tab(target_id)
+                        break
+                    scroll(target_id, y=4000)
+                    if _wait_or_stop(stop_event, 1.5):
+                        close_tab(target_id)
+                        break
 
-                # Extract job list
-                result = evaluate(target_id, JS_EXTRACT_LIST)
-                if not result:
-                    close_tab(target_id)
-                    break
+                    # Extract job list
+                    result = evaluate(target_id, JS_EXTRACT_LIST)
+                    if not result:
+                        close_tab(target_id)
+                        break
 
-                try:
-                    jobs_list = json.loads(result)
-                except (json.JSONDecodeError, TypeError):
-                    close_tab(target_id)
-                    break
+                    try:
+                        jobs_list = json.loads(result)
+                    except (json.JSONDecodeError, TypeError):
+                        close_tab(target_id)
+                        break
 
                 close_tab(target_id)
 

@@ -146,6 +146,9 @@ class SendWindowChecker:
         if len(parts) == 2:
             try:
                 hour, minute = int(parts[0]), int(parts[1])
+                if hour == 24 and minute == 0:
+                	# "24:00" means end of day; treat as 23:59 so window stays active
+                	return 23, 59
                 if 0 <= hour <= 23 and 0 <= minute <= 59:
                     return hour, minute
             except ValueError:

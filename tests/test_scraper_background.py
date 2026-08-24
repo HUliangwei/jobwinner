@@ -161,7 +161,7 @@ class ScraperBackgroundTests(unittest.TestCase):
             [
                 call(
                     "https://www.zhipin.com/web/geek/job?query=AI&city=101010100",
-                    background=True,
+                    background=False,
                 ),
                 call(
                     "https://www.zhipin.com/job_detail/background-job.html",

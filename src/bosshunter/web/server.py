@@ -252,7 +252,7 @@ def _sanitize_config_for_write(data):
 def _preflight_messages(mode: str, config: dict) -> list[str]:
 	"""Return user-actionable blockers before starting a dashboard task."""
 	messages: list[str] = []
-	if mode not in {"full", "collect", "rescore", "score", "monitor"}:
+	if mode not in {"full", "collect", "rescore", "score", "monitor", "deliver"}:
 		messages.append(f"不支持的任务模式：{mode}")
 
 	from bosshunter.ai.resume_picker import resume_paths
@@ -288,6 +288,7 @@ def _record_collect_progress(task: WorkbenchTask, state: dict) -> None:
 	})
 
 
+
 def _record_score_progress(task: WorkbenchTask, state: dict) -> None:
 	task.metrics.update({
 		"ai_completed": int(state.get("completed") or 0),
@@ -300,6 +301,7 @@ def _record_score_progress(task: WorkbenchTask, state: dict) -> None:
 		task,
 		f"AI 评分进度 {state['completed']}/{state['total']}：通过 {state['scored']}，过滤 {state['filtered']}，失败 {state['failed']}",
 	)
+
 
 
 def _execute_collect(task: WorkbenchTask, config: dict) -> None:
@@ -466,7 +468,7 @@ def _execute_score(task: WorkbenchTask, config: dict) -> None:
 		_log(task, "评分流水线已停止")
 		return
 
-	_log(task, f"开始单独 AI 评分：{len(options.get('job_ids', []))} 个岗位")
+	_log(task, f"开始 AI 评分：{len(options.get('job_ids', []))} 个岗位")
 	try:
 		score_jobs(
 			score_config,
@@ -502,6 +504,18 @@ def _queue_monitor_delivery(
 		if new_ids:
 			pending.append({"job_ids": new_ids, "direct_send": direct_send})
 			_log(task, f"监测期间新增 {len(new_ids)} 个确认投递岗位，已加入发送队列")
+	# 记录进入发送环节的岗位 id（前端“确认投递”区显示锁定·正在发送）
+	sending_ids = set(task.context.get("sending_job_ids", []))
+	sending_ids.update(str(job_id) for job_id in job_ids)
+	task.context["sending_job_ids"] = sorted(sending_ids)
+	# 前端需要即时“发送进行中”反馈：即使监测线程还没真正开始发，
+	# 先按队列总量给出初始进度（本轮已发送 0 / 待发送 N）
+	total_queued = sum(len(b.get("job_ids", [])) for b in pending)
+	already_done = int(task.metrics.get("send_sent", 0) or 0) + int(task.metrics.get("send_failed", 0) or 0)
+	task.metrics["send_total"] = total_queued + already_done
+	task.metrics["send_remaining"] = total_queued
+	task.metrics.setdefault("send_sent", 0)
+	task.metrics.setdefault("send_failed", 0)
 	wakeup_event = task.context.get("monitor_wakeup_event")
 	if isinstance(wakeup_event, Event):
 		wakeup_event.set()
@@ -540,7 +554,14 @@ def _execute_monitor(task: WorkbenchTask, config: dict) -> None:
 				if task.stop_requested.is_set():
 					return
 			_log(task, "执行一轮监测")
-			monitor_and_send_resumes(monitor_config)
+			monitor_summary = monitor_and_send_resumes(monitor_config)
+			if isinstance(monitor_summary, dict):
+				task.metrics.update({
+					"monitor_replied": int(monitor_summary.get("replied") or 0),
+					"monitor_pending": int(monitor_summary.get("needs_resume") or 0),
+					"monitor_rejected": int(monitor_summary.get("rejected") or 0),
+					"monitor_checks": int(task.metrics.get("monitor_checks") or 0) + 1,
+				})
 			if task.stop_requested.is_set():
 				return
 			# 官网投递进度巡检：顺带检查各官网投递记录页，写回 stage
@@ -782,6 +803,32 @@ def _execute_deliver_batch(task: WorkbenchTask, config: dict) -> None:
 	config = dict(config)
 	config["_workbench_stop_event"] = task.stop_requested
 	config["_workbench_log"] = lambda message: _log(task, message)
+
+	def _send_progress(state: dict) -> None:
+		"""Live per-job send progress → task metrics + real-time log (吃进度条)."""
+		done = int(state.get("done") or 0)
+		total = int(state.get("total") or 0)
+		sent = int(state.get("sent") or 0)
+		failed = int(state.get("failed") or 0)
+		phase = str(state.get("phase") or "sending")
+		company = str(state.get("current_company") or "")
+		title = str(state.get("current_title") or "")
+		task.metrics.update({
+			"send_sent": sent,
+			"send_failed": failed,
+			"send_total": total,
+			"send_remaining": max(total - done, 0),
+			"send_phase": phase,
+		})
+		phase_label = {"browsing": "模拟浏览中", "opening": "打开岗位页中", "sending": "正在发送中"}.get(phase, "发送中")
+		if phase == "browsing":
+			_log(task, f"{phase_label}：{company}｜{title}（已发 {sent}/{total}，剩余 {max(total - done, 0)}）")
+		elif company:
+			_log(task, f"{phase_label}：{company}｜{title}（已发 {sent}/{total}，剩余 {max(total - done, 0)}）")
+		else:
+			_log(task, f"发送进度：已发 {sent}/{total}，待发送 {max(total - done, 0)}")
+
+	config["_workbench_send_progress"] = _send_progress
 	selected_job_ids = [str(job_id) for job_id in config.get("_workbench_job_ids", []) if str(job_id)]
 	if not config.get("_workbench_skip_greeting"):
 		_log(task, "生成招呼语")
@@ -808,6 +855,18 @@ def _execute_deliver_batch(task: WorkbenchTask, config: dict) -> None:
 		task,
 		f"招呼语发送结果：成功 {sent_count}，失败 {failed_count}，待下次发送 {deferred_count}（共 {total_count}）",
 	)
+	task.metrics.update({
+		"send_sent": int(sent_count or 0),
+		"send_failed": int(failed_count or 0),
+		"send_deferred": int(deferred_count or 0),
+		"send_total": int(total_count or 0),
+		"send_remaining": 0,
+	})
+	# 本批岗位处理完毕（成功/失败/顺延回池），解除“锁定·正在发送”标记
+	done_ids = set(str(job_id) for job_id in selected_job_ids if str(job_id))
+	if done_ids:
+		remaining_sending = [job_id for job_id in task.context.get("sending_job_ids", []) if job_id not in done_ids]
+		task.context["sending_job_ids"] = remaining_sending
 	if failed_count:
 		_log(task, f"{failed_count} 个岗位发送失败已单独记录，继续后续流程")
 	if quota_deferred_count:
@@ -1195,6 +1254,17 @@ def api_history_unresolved_replies_count():
 		db.close()
 
 
+def _send_window_info(config):
+	from bosshunter.throttle import SendWindowChecker
+	windows = config.get("throttle", {}).get("send_windows", ["09:00-16:00"])
+	checker = SendWindowChecker(windows)
+	return {
+		"windows": list(windows),
+		"active": bool(checker.is_active()),
+		"next": checker.next_window_info(),
+	}
+
+
 @app.route("/api/workbench")
 def api_workbench():
 	db = _get_web_db()
@@ -1210,9 +1280,11 @@ def api_workbench():
 			],
 			"pending_greetings": get_jobs_ready_to_send(db),
 			"send_errors": get_jobs_with_send_errors(db),
+			"send_window": _send_window_info(load_config(CONFIG_PATH)),
 			"needs_resume": get_jobs_needing_resume(db),
 			"resume_pending": get_jobs_resume_pending(db),
 			"task": status["active"],
+			"active_tasks": status.get("active_tasks", []),
 			"last_task": status["last_task"],
 		})
 	finally:
@@ -1411,8 +1483,22 @@ def api_workbench_task_start():
 		messages = _preflight_messages(mode, load_config(CONFIG_PATH))
 		if messages:
 			return _json_response({"error": "请先处理启动前检查", "messages": messages}, 400)
+		config = _task_config()
+		if mode == "deliver":
+			from bosshunter.db import get_jobs_ready_to_send
+			db = _get_web_db()
+			try:
+				ready_jobs = get_jobs_ready_to_send(db)
+			finally:
+				db.close()
+			ready_ids = [str(job["id"]) for job in ready_jobs]
+			if not ready_ids:
+				return _json_response({"error": "当前没有已生成招呼语的待发送岗位，请先完成评分与招呼语生成。"}, 400)
+			config["_workbench_job_ids"] = ready_ids
+		elif mode == "score":
+			config["_pool_loop"] = True
 		with job_mutation_lock:
-			task = task_runner.start(mode, _task_config())
+			task = task_runner.start(mode, config)
 		return _json_response(task)
 	except TaskAlreadyRunningError as e:
 		return _json_response({"error": str(e)}, 409)
@@ -1483,9 +1569,16 @@ def api_workbench_deliver():
 		):
 			waiting_task = active_runtime_task
 		if active_task and not waiting_task and not monitoring_task and not delivery_task:
-			raise TaskAlreadyRunningError(
-				f"当前已有后台任务「{active_task.get('label', '未知任务')}」正在运行或停止中，请等待其完全结束"
-			)
+			# deliver conflicts only with another deliver or with a running full
+			# pipeline (which already drives sending); all other tasks
+			# (collect/score/monitor) run concurrently with delivery.
+			from bosshunter.web.tasks import MODE_GROUPS
+			active_mode = active_task.get("mode", "")
+			active_group = MODE_GROUPS.get(active_mode, active_mode)
+			if active_group == "deliver" or active_mode == "full":
+				raise TaskAlreadyRunningError(
+					f"当前已有后台任务「{active_task.get('label', '未知任务')}」正在运行或停止中，请等待其完全结束"
+				)
 
 		queued_payload = None
 		status_job_ids = job_ids
@@ -1610,6 +1703,24 @@ def api_job_update_greeting(job_id):
 
 
 @app.route("/api/jobs/<job_id>/mark-resume-sent", method="POST")
+@app.route("/api/greeting/polish", method="POST")
+def api_greeting_polish():
+	"""Polish a user-written greeting via AI without saving it."""
+	try:
+		body = request.json or {}
+		greeting = str(body.get("greeting", "")).strip()
+		if not greeting:
+			return _json_response({"error": "缺少招呼语内容"}, 400)
+		from bosshunter.ai.greeter import polish_greeting
+		config = load_config(CONFIG_PATH)
+		polished = polish_greeting(greeting, config)
+		if not polished:
+			return _json_response({"error": "AI 润色失败，请稍后重试"}, 502)
+		return _json_response({"polished": polished})
+	except Exception as exc:
+		return _json_response({"error": str(exc)}, 500)
+
+
 def api_job_mark_resume_sent(job_id):
 	db = _get_web_db()
 	try:

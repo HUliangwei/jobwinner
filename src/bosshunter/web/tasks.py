@@ -7,17 +7,33 @@ from datetime import datetime
 from threading import Event, Lock, Thread, Timer
 from typing import Any, Callable
 from uuid import uuid4
+import traceback
 
 from bosshunter.throttle import SendWindowChecker
 
 
+from bosshunter.browser_lock import BROWSER_LOCK
+
+# Parallelism model: every mode is its own group so collect/score/monitor/
+# deliver can all run concurrently and independently. Same-mode is mutually
+# exclusive; full bundles everything and stays exclusive with all modes.
+MODE_GROUPS = {
+    "deliver": "deliver",
+    "collect": "collect",
+    "score": "score",
+    "rescore": "rescore",
+    "monitor": "monitor",
+    "full": "full",
+}
+
+
 MODE_LABELS = {
     "full": "运行全流程",
-    "collect": "单独采集",
-    "score": "单独 AI 评分",
+    "collect": "采集",
+    "score": "AI 评分",
     "rescore": "重新评分",
-    "monitor": "单独监测",
-    "deliver": "确认投递",
+    "monitor": "监测",
+    "deliver": "发送",
 }
 
 TERMINAL_STATUSES = {"completed", "failed", "stopped"}
@@ -59,6 +75,8 @@ class WorkbenchTask:
             "stop_reason": self.stop_reason,
             "stop_requested": self.stop_requested.is_set(),
             "metrics": dict(self.metrics),
+            "traceback": self.context.get("traceback"),
+            "sending_job_ids": list(self.context.get("sending_job_ids") or []),
         }
 
 
@@ -78,10 +96,21 @@ class WorkbenchTaskRunner:
             raise ValueError(f"Unsupported workbench mode: {mode}")
 
         with self._lock:
-            active = self._active_task_locked()
-            if active:
+            group = MODE_GROUPS.get(mode, mode)
+            conflicting = self._active_in_group_locked(group)
+            if conflicting:
                 raise TaskAlreadyRunningError(
-                    f"当前已有后台任务「{active.label}」正在运行或停止中，请等待其完全结束"
+                    f"任务「{conflicting.label}」正在运行，同类型的任务不能同时启动；"
+                    f"但可以启动其他环节的任务（如发送/采集/评分/监测并行）"
+                )
+            active_any = self._active_task_locked()
+            if mode == "full" and active_any:
+                raise TaskAlreadyRunningError(
+                    f"任务「{active_any.label}」正在运行，全流程常驻占用所有环节，请先停止它再启动。"
+                )
+            if active_any is not None and active_any.mode == "full":
+                raise TaskAlreadyRunningError(
+                    f"全流程常驻「{active_any.label}」正在运行并占用采集/评分/监测，请先停止它再启动其他任务。"
                 )
 
             task = WorkbenchTask(id=str(uuid4()), mode=mode, label=MODE_LABELS[mode])
@@ -112,9 +141,15 @@ class WorkbenchTaskRunner:
     def status(self) -> dict:
         with self._lock:
             active = self._active_task_locked()
+            active_tasks = [
+                task.snapshot()
+                for task in self._tasks.values()
+                if task.status in ACTIVE_STATUSES
+            ]
             tasks = [task.snapshot() for task in self._tasks.values()]
             return {
                 "active": active.snapshot() if active else None,
+                "active_tasks": active_tasks,
                 "last_task": tasks[-1] if tasks else None,
                 "tasks": tasks,
             }
@@ -164,6 +199,8 @@ class WorkbenchTaskRunner:
                 else:
                     task.status = "failed"
                     task.error = str(exc)
+                    task.context = dict(task.context)
+                    task.context["traceback"] = traceback.format_exc()
                 task.updated_at = datetime.now().isoformat(timespec="seconds")
         finally:
             with self._lock:
@@ -180,6 +217,13 @@ class WorkbenchTaskRunner:
     def _active_task_locked(self) -> WorkbenchTask | None:
         for task in self._tasks.values():
             if task.status in ACTIVE_STATUSES:
+                return task
+        return None
+
+    def _active_in_group_locked(self, group: str) -> WorkbenchTask | None:
+        """Return an active task whose mode shares the given parallelism group."""
+        for task in self._tasks.values():
+            if task.status in ACTIVE_STATUSES and MODE_GROUPS.get(task.mode, task.mode) == group:
                 return task
         return None
 

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { JobsTable } from '@/components/dashboard/JobsTable'
 import { RecycleBinPanel } from '@/components/dashboard/RecycleBinPanel'
 import { ScoreJobsDialog } from '@/components/dashboard/ScoreJobsDialog'
+import { TaskPipelineStages } from '@/components/dashboard/TaskPipelineStages'
 import { JobFilterBar } from '@/components/jobs/JobFilterBar'
 import { parseHistoryDetail } from '@/lib/historyDetail'
 import {
@@ -19,22 +20,25 @@ import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
   BriefcaseBusiness,
+  Clock,
   Download,
   ExternalLink,
   Eye,
   FileText,
+  Lock,
   MessageCircle,
   Pencil,
   Play,
   RefreshCw,
   Send,
+  Sparkles,
   Square,
   Star,
   Trash2,
   XCircle,
 } from 'lucide-react'
 
-type WorkbenchMode = 'full' | 'collect' | 'rescore' | 'score' | 'monitor'
+type WorkbenchMode = 'full' | 'collect' | 'rescore' | 'score' | 'monitor' | 'deliver'
 type DashboardView = 'workbench' | 'jobs' | 'monitor'
 type StatsScope = 'today' | 'total'
 
@@ -141,20 +145,20 @@ const modes: Array<{ mode: WorkbenchMode; title: string; description: string; st
   },
   {
     mode: 'collect',
-    title: '独立采集',
-    description: '只采集岗位写入待评分池，不评分',
+    title: '采集',
+    description: '持续采集岗位写入待评分池，可与发送/评分/监测并行，不评分',
     stage: '①',
   },
   {
     mode: 'score',
-    title: '独立评分',
-    description: '对待评分池岗位评分，通过者自动生成招呼语；评完即停',
+    title: '评分',
+    description: '持续消费待评分池评分（FIFO，无岗位时空闲等待），通过者自动生成招呼语；可与发送/采集/监测并行，常驻运行直到手动停止',
     stage: '②',
   },
   {
     mode: 'monitor',
-    title: '独立监测',
-    description: '监测已投递岗位的 HR 回复/要简历，常驻运行直到手动停止',
+    title: '监测',
+    description: '监测已投递岗位的 HR 回复/要简历；可与发送/采集/评分并行，常驻运行直到手动停止',
     stage: '⑤',
   },
 ]
@@ -214,14 +218,40 @@ const statItems = [
   { key: '发送', todayLabel: '今日已投递', totalLabel: '累计已投递', highlight: true },
 ]
 
-const taskMetricItems = [
-  { key: 'collect_seen', label: '本轮扫描' },
-  { key: 'collect_new', label: '本轮新增' },
-  { key: 'collect_duplicate', label: '重复岗位' },
-  { key: 'ai_passed', label: 'AI通过' },
-  { key: 'ai_filtered', label: 'AI过滤' },
-  { key: 'ai_failed', label: 'AI失败' },
-]
+const METRIC_DEFS: Record<string, { key: string; label: string }> = {
+  collect_seen: { key: 'collect_seen', label: '本轮扫描' },
+  collect_new: { key: 'collect_new', label: '本轮新增' },
+  collect_duplicate: { key: 'collect_duplicate', label: '重复岗位' },
+  ai_completed: { key: 'ai_completed', label: '已评分' },
+  ai_total: { key: 'ai_total', label: '待评分' },
+  ai_passed: { key: 'ai_passed', label: 'AI通过' },
+  ai_filtered: { key: 'ai_filtered', label: 'AI过滤' },
+  ai_failed: { key: 'ai_failed', label: 'AI失败' },
+  send_sent: { key: 'send_sent', label: '本轮已发送' },
+  send_remaining: { key: 'send_remaining', label: '待发送' },
+  send_failed: { key: 'send_failed', label: '本轮失败' },
+  monitor_replied: { key: 'monitor_replied', label: 'HR新回复' },
+  monitor_pending: { key: 'monitor_pending', label: '待回复' },
+  monitor_rejected: { key: 'monitor_rejected', label: '已拒绝' },
+  monitor_checks: { key: 'monitor_checks', label: '检查轮次' },
+}
+
+// 每环节只显示与自身相关的指标，避免满屏无意义的 0（视觉优化）
+const MODE_METRIC_KEYS: Record<string, string[]> = {
+  full: ['collect_seen', 'collect_new', 'ai_passed', 'ai_filtered', 'send_sent', 'send_remaining', 'send_failed'],
+  collect: ['collect_seen', 'collect_new', 'collect_duplicate'],
+  score: ['ai_completed', 'ai_total', 'ai_passed', 'ai_filtered', 'ai_failed'],
+  rescore: ['ai_completed', 'ai_total', 'ai_passed', 'ai_filtered', 'ai_failed'],
+  monitor: ['monitor_replied', 'monitor_pending', 'monitor_rejected', 'monitor_checks', 'send_sent', 'send_remaining', 'send_failed'],
+  deliver: ['send_sent', 'send_remaining', 'send_failed'],
+}
+
+function visibleMetricItems(task: WorkbenchTask) {
+  const keys = MODE_METRIC_KEYS[task.mode] || []
+  return keys
+    .map(key => METRIC_DEFS[key])
+    .filter(def => def && task.metrics && def.key in task.metrics!)
+}
 
 function jobSubtitle(job: Job) {
   return [job.score ? `匹配 ${job.score}` : '', job.salary, job.hr_active || '活跃度未知', getStatusLabel(job.status)].filter(Boolean).join(' · ')
@@ -410,6 +440,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
   const [editGreetingJob, setEditGreetingJob] = useState<Job | null>(null)
   const [editGreetingText, setEditGreetingText] = useState('')
   const [editGreetingSaving, setEditGreetingSaving] = useState(false)
+  const [editGreetingPolishing, setEditGreetingPolishing] = useState(false)
 
   const todayJobs = useMemo(
     () => workbench.pending_confirmation.filter(job => !confirmedDeliveryIds.has(job.id)),
@@ -424,7 +455,10 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
     () => filterJobs(todayJobs, effectiveTodayFilters),
     [todayJobs, effectiveTodayFilters]
   )
-  const visibleJobIds = useMemo(() => new Set(filteredTodayJobs.map(job => job.id)), [filteredTodayJobs])
+  const pendingGreetingJobs = workbench.pending_greetings
+  // Unified selection pool: jobs awaiting confirmation + greeting-ready jobs
+  const visibleJobIds = useMemo(() => new Set([...filteredTodayJobs.map(job => job.id), ...pendingGreetingJobs.map(job => job.id)]), [filteredTodayJobs, pendingGreetingJobs])
+  const greetingReadyIds = useMemo(() => new Set(pendingGreetingJobs.map(job => job.id)), [pendingGreetingJobs])
   const actionableSelected = useMemo(() => selected.filter(id => visibleJobIds.has(id)), [selected, visibleJobIds])
 
   useEffect(() => {
@@ -433,13 +467,68 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
       return next.length === previous.length ? previous : next
     })
   }, [visibleJobIds])
-  const pendingGreetingJobs = workbench.pending_greetings
   const resumePendingJobs = [...(workbench.resume_pending ?? []), ...(workbench.needs_resume ?? [])]
   const resumeItems = resumePendingJobs.filter((job, index, arr) => arr.findIndex(candidate => candidate.id === job.id) === index)
   const totalConfirmCount = todayJobs.length + pendingGreetingJobs.length
   const pendingScoreCount = Math.max(0, (workbench.funnel['采集总数'] || 0) - (workbench.funnel['初筛通过'] || 0) - (workbench.funnel['AI评分'] || 0))
   const activeTask = workbench.task
   const visibleTask = activeTask || workbench.last_task
+  const activeTasks = workbench.active_tasks?.length ? workbench.active_tasks : (activeTask ? [activeTask] : [])
+  // 状态区展示所有活跃任务；无活跃任务时回退显示最近一次“已失败”的任务（错误信息需要可见），
+  // 不回退显示 stopped/completed，避免“停止后仍显示运行中”的误导
+  const lastFailedTask = (!activeTasks.length && workbench.last_task?.status === 'failed') ? [workbench.last_task] : []
+  const statusTasks = activeTasks.length ? activeTasks : lastFailedTask
+  // 正在发送的宿主任务（监测/全流程/monitor 消费发送队列时，metrics 带 send_total/send_remaining）
+  const sendingTask = activeTasks.find(t =>
+    t.metrics && (Number(t.metrics.send_total) > 0 || Number(t.metrics.send_remaining) > 0)
+  )
+  const sendPhase = sendingTask?.metrics?.send_phase as string | undefined
+  // 有独立“发送”任务卡时，卡片自身已展示发送进度；顶部横幅只用于“发送被内嵌在监测/全流程里”时兜底，
+  // 避免出现两个发送状态UI
+  const hasDeliverTask = activeTasks.some(t => t.mode === 'deliver' && (t.status === 'running' || t.status === 'stopping'))
+  const showSendBanner = !hasDeliverTask && (sendingTask?.mode !== 'deliver')
+  const sendProgress = showSendBanner && sendingTask?.metrics
+    ? {
+        sent: Number(sendingTask.metrics.send_sent || 0),
+        remaining: Number(sendingTask.metrics.send_remaining || 0),
+        failed: Number(sendingTask.metrics.send_failed || 0),
+        total: Number(sendingTask.metrics.send_total || 0),
+        phase: sendPhase || (Number(sendingTask.metrics.send_remaining || 0) > 0 ? 'sending' : 'done'),
+      }
+    : null
+  // 已进入发送环节（锁定·正在发送）的岗位 id 集合：从所有活跃任务的发送队列汇总
+  const sendingJobIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of activeTasks) {
+      for (const jobId of (t.sending_job_ids || [])) ids.add(jobId)
+    }
+    return ids
+  }, [activeTasks])
+  // 某模式是否正在运行/停止（支持并行：遍历所有活跃任务，而非只看第一个）
+  const isModeRunning = (mode: WorkbenchMode) =>
+    activeTasks.some(t => t.mode === mode && (t.status === 'running' || t.status === 'stopping'))
+  // Parallelism model: every mode is its own group, so collect/score/monitor/
+  // deliver can all run concurrently and independently. Only the same mode
+  // twice, or full (which bundles everything) alongside anything, is blocked.
+  const MODE_GROUPS_FRONT: Record<string, string> = {
+    deliver: 'deliver',
+    collect: 'collect',
+    score: 'score',
+    rescore: 'rescore',
+    monitor: 'monitor',
+    full: 'full',
+  }
+  const sameGroupActive = (mode: WorkbenchMode): boolean => {
+    // 并行模型下每一环节独立成组：仅当目标 mode 与任一活跃任务同组才算冲突
+    const group = MODE_GROUPS_FRONT[mode]
+    return activeTasks.some(t => {
+      if (t.status !== 'running' && t.status !== 'stopping') return false
+      if (t.mode === mode) return true
+      return MODE_GROUPS_FRONT[t.mode] === group
+    })
+  }
+  const modeIsActive = (mode: WorkbenchMode) =>
+    activeTasks.some(t => t.mode === mode && (t.status === 'running' || t.status === 'stopping'))
   const visibleTaskError = visibleTask?.error ? taskErrorFeedback(visibleTask.error) : null
   const pendingReplies = history.filter(item => item.action === 'reply_pending')
 
@@ -461,21 +550,29 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
 
   const handleModeClick = async (mode: WorkbenchMode) => {
     try {
-      if (activeTask?.mode === mode) {
-        if (window.confirm(`是否停止当前${activeTask.label}任务？已入库岗位会保留。`)) {
+      const runningForMode = activeTasks.find(t => t.mode === mode && (t.status === 'running' || t.status === 'stopping'))
+      if (runningForMode) {
+        if (runningForMode.status === 'stopping') {
+          setNotice(`当前${runningForMode.label}正在停止，请等待后台完全结束。`)
+          return
+        }
+        if (window.confirm(`是否停止当前${runningForMode.label}任务？已入库岗位会保留。`)) {
           setModePending(mode)
-          setNotice(`正在停止${activeTask.label}...`)
-          await stopTask(activeTask.id)
-          setNotice(`${activeTask.label}已请求停止。`)
+          setNotice(`正在停止${runningForMode.label}...`)
+          await stopTask(runningForMode.id)
+          setNotice(`${runningForMode.label}已请求停止。`)
         }
         return
       }
       if (modePending) return
-      if (activeTask) {
+      if (sameGroupActive(mode)) {
+        const blocking = activeTasks.find(t => (t.status === 'running' || t.status === 'stopping') && (
+          t.mode === mode || MODE_GROUPS_FRONT[t.mode] === MODE_GROUPS_FRONT[mode]
+        ))
         setNotice(
-          activeTask.status === 'stopping'
-            ? `当前${activeTask.label}正在停止，请等待后台完全结束后再启动其他模式。`
-            : `当前正在运行${activeTask.label}，请先点击橙色卡片停止后再启动其他模式。`
+          blocking?.status === 'stopping'
+            ? `当前${blocking.label}正在停止，请等待后台完全结束后再启动同类型任务。`
+            : `当前正在运行${blocking?.label || '同类型任务'}，请先停止它再启动同类型任务；其他环节（如发送/采集/评分）可以与它并行。`
         )
         return
       }
@@ -493,6 +590,20 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
     }
   }
 
+  const handleStopTask = async (task: WorkbenchTask) => {
+    if (!window.confirm(`是否停止${task.label}？已入库岗位会保留，其他并行任务不受影响。`)) return
+    try {
+      setModePending(task.mode as WorkbenchMode)
+      setNotice(`正在停止${task.label}...`)
+      await stopTask(task.id)
+      setNotice(`${task.label}已请求停止。`)
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '停止失败')
+    } finally {
+      setModePending(null)
+    }
+  }
+
   const retryPreflight = async () => {
     if (modePending) return
     try {
@@ -505,6 +616,17 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
     } finally {
       setModePending(null)
     }
+  }
+
+  // Unified delivery for the confirmation section: pending-confirm jobs go
+  // through normal delivery (greeting generated if needed), greeting-ready
+  // jobs are sent directly (direct_send) without regenerating.
+  const deliverSelection = async (ids: string[]) => {
+    if (!ids.length) return
+    const confirmIds = ids.filter(id => !greetingReadyIds.has(id))
+    const readyIds = ids.filter(id => greetingReadyIds.has(id))
+    if (confirmIds.length) await confirmDeliver(confirmIds)
+    if (readyIds.length) await sendReadyGreetings(readyIds)
   }
 
   const confirmDeliver = async (ids: string[]) => {
@@ -528,10 +650,10 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
       await refresh()
       setNotice(
         data.already_queued_count === count
-          ? `所选 ${count} 个岗位已在当前发送队列中。`
+          ? `所选 ${count} 个岗位已在发送队列中，等待依次发送。`
           : data.queued_count
-            ? `已将 ${data.queued_count} 个岗位追加到当前发送队列。`
-            : `已确认投递 ${count} 个岗位，后端会按队列推进。`
+            ? `已将 ${data.queued_count} 个岗位加入发送环节，正在依次发送。`
+            : `已进入发送环节 ${count} 个岗位，状态区实时显示“正在发送 / 本轮已发送”。`
       )
       setSelected(prev => prev.filter(id => !new Set(ids).has(id)))
     } catch (err) {
@@ -587,6 +709,34 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
       )
     } catch (err) {
       setNotice(err instanceof Error ? err.message : '发送失败')
+    }
+  }
+
+  const polishGreetingText = async () => {
+    if (editGreetingPolishing) return
+    const text = editGreetingText.trim()
+    if (!text) {
+      setNotice('先输入内容再润色')
+      return
+    }
+    try {
+      setEditGreetingPolishing(true)
+      const res = await fetch('/api/greeting/polish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ greeting: text }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || '润色失败')
+      }
+      const data = await res.json().catch(() => ({}))
+      if (data.polished) setEditGreetingText(data.polished)
+      setNotice('已按你的内容润色，可继续编辑后保存。')
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : '润色失败')
+    } finally {
+      setEditGreetingPolishing(false)
     }
   }
 
@@ -693,7 +843,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
               )}
             </div>
             <span className="rounded-full bg-[#FFF0E5] px-3 py-2 text-xs font-black text-primary">
-              {activeTask ? `${activeTask.label}中` : '当前空闲'}
+              {activeTasks.length ? `${activeTasks.length} 个任务运行中` : '当前空闲'}
             </span>
           </div>
         </div>
@@ -701,50 +851,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
 
         <PipelineStatusBar funnel={workbench.funnel} />
 
-        {visibleTask && (
-          <div className="mt-3 rounded-3xl border border-card-border bg-[#FFFCFA] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-black">任务运行状态</div>
-                <p className="mt-1 text-xs leading-5 text-muted">实时进度与错误信息。若浏览器无反应，请确认已打开 BOSS 直聘并登录、Chrome 调试连接可用。</p>
-              </div>
-              <span className="rounded-full bg-[#FFF0E5] px-3 py-1 text-xs font-black text-primary">
-                {visibleTask.label}
-              </span>
-            </div>
-            <div className={`mt-3 rounded-2xl border px-4 py-3 ${taskStatusClass(visibleTask.status)}`}>
-              <div className="text-xs font-black text-primary">{taskStatusTitle(visibleTask.status)}</div>
-              <div className="mt-1 text-lg font-black text-foreground">{currentTaskStage(visibleTask.logs)}</div>
-              <div className="mt-1 text-xs font-bold text-muted">任务状态：{taskStatusText(visibleTask.status)}</div>
-              {visibleTask.deadline_at && (
-                <div className="mt-1 text-xs font-bold text-muted">
-                  自动截止：{new Date(visibleTask.deadline_at).toLocaleString('zh-CN', { hour12: false })}
-                </div>
-              )}
-              {visibleTask.metrics && taskMetricItems.some(item => item.key in visibleTask.metrics!) && (
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                  {taskMetricItems.map(item => (
-                    <div key={item.key} className="rounded-xl border border-card-border bg-white px-3 py-2">
-                      <div className="text-[10px] font-bold text-muted">{item.label}</div>
-                      <div className="mt-0.5 text-lg font-black text-foreground">{visibleTask.metrics?.[item.key] ?? 0}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {visibleTask.error && visibleTaskError && (
-              <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-danger">
-                <div className="font-black">{visibleTaskError.title}</div>
-                <p className="mt-1 text-xs leading-5">{visibleTaskError.detail}</p>
-                <details className="mt-2 text-xs text-muted">
-                  <summary className="cursor-pointer font-bold">查看原始错误</summary>
-                  <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-white p-2">{visibleTask.error}</pre>
-                </details>
-              </div>
-            )}
-            {visibleTask.stop_reason && <div className="mt-3 rounded-2xl bg-[#FFF0E5] px-3 py-2 text-sm text-primary">{visibleTask.stop_reason}</div>}
-          </div>
-        )}
+        {/* 任务状态卡已下放到各功能区（采集/评分/发送/监测），此处不再重复展示 */}
       </section>
 
       <section>
@@ -793,49 +900,132 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         </div>
       </section>
 
-      {/* ① 采集 —— 入口卡片组（全流程常驻 / 独立采集 / 独立评分 / 独立监测） */}
+      {/* 工作流 —— 模式开关一行 + 任务状态区一行（状态卡带模式标签对应） */}
       <section className="rounded-3xl border border-card-border bg-white p-5">
         <PipelineSectionHeader
           seq="①"
-          title="采集"
-          description="按关键词和城市持续采集岗位，写入待评分池；可选全流程常驻或只采集。"
+          title="工作流"
+          description="按需启动各环节任务，任务可并行互不干涉；下方实时显示各环节运行状态。"
         />
+        {/* 模式开关行：四卡等高（发送不在此列——发送由「一键投递/确认」区触发，仅以任务状态区展示运行状态） */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
           {modes.map(item => {
-            const isActive = activeTask?.mode === item.mode
-            const disabled = Boolean(activeTask && !isActive)
+            const isActive = modeIsActive(item.mode)
+            const isPending = modePending === item.mode
+            // full 与所有环节互斥：full 运行→其他卡禁用；其他任务运行→full 卡禁用；同组（同环节）运行→该卡禁用（此时 isActive 为真，故不影响已运行卡）
+            const anyNonFullRunning = activeTasks.some(t => t.mode !== 'full' && (t.status === 'running' || t.status === 'stopping'))
+            const fullRunning = activeTasks.some(t => t.mode === 'full' && (t.status === 'running' || t.status === 'stopping'))
+            const disabled = !isActive && !isPending && (
+              (item.mode === 'full' && anyNonFullRunning)
+              || (item.mode !== 'full' && (fullRunning || sameGroupActive(item.mode)))
+            )
+            const modeBadge = item.mode === 'score' ? `待评分池 ${pendingScoreCount} 个` : item.mode === 'monitor' ? `待确认 ${resumeItems.length} 个` : ''
             return (
               <button
                 key={item.mode}
                 onClick={() => handleModeClick(item.mode)}
                 aria-disabled={disabled}
-                className={`min-h-[126px] rounded-3xl p-5 text-left transition ${
+                className={`flex h-full min-h-[120px] flex-col rounded-3xl p-4 text-left transition ${
                   isActive
                     ? 'border-2 border-primary bg-primary text-white shadow-xl shadow-primary/20'
-                    : disabled
-                      ? 'cursor-not-allowed border border-card-border bg-white text-muted opacity-45'
-                      : 'border border-card-border bg-[#FFFCFA] text-foreground hover:border-primary/60 hover:shadow-md'
+                    : isPending
+                      ? 'border-2 border-primary/70 bg-[#FFF0E5] text-primary shadow-md'
+                      : disabled
+                        ? 'cursor-not-allowed border border-card-border bg-white text-muted opacity-45'
+                        : 'border border-card-border bg-[#FFFCFA] text-foreground hover:border-primary/60 hover:shadow-md'
                 }`}
               >
-                <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-[#FFF0E5] text-primary'
-                    }`}>
+                    <span className={`rounded-lg px-1.5 py-0.5 text-[11px] font-black ${isActive ? 'bg-white/20 text-white' : isPending ? 'bg-primary/10 text-primary' : 'bg-[#FFF0E5] text-primary'}`}>
                       {item.stage}
                     </span>
-                    <div className="text-base font-black leading-6">
-                      {modePending === item.mode
+                    <div className="text-sm font-black leading-5">
+                      {isPending
                         ? isActive ? '任务停止中' : '任务启动中'
                         : isActive ? `${item.title}中` : item.title}
                     </div>
                   </div>
-                  {isActive ? <Square className="h-5 w-5 shrink-0 fill-current" /> : <Play className="h-5 w-5 shrink-0" />}
+                  {isActive
+                    ? <Square className="h-4 w-4 shrink-0 fill-current" />
+                    : isPending
+                      ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary/40 border-t-primary" />
+                      : <Play className="h-4 w-4 shrink-0" />}
                 </div>
-                <p className={`text-xs leading-6 ${isActive ? 'text-white/85' : 'text-muted'}`}>{item.description}</p>
+                <p className={`flex-1 text-[11px] leading-5 ${isActive ? 'text-white/85' : isPending ? 'text-primary' : 'text-muted'}`}>{item.description}</p>
+                {modeBadge && !isActive && <div className="mt-2 inline-block self-start rounded-full bg-[#FFF0E5] px-2 py-0.5 text-[11px] font-black text-primary">{modeBadge}</div>}
               </button>
             )
           })}
+        </div>
+        {/* 评分说明：FIFO 消费规则（整合自原评分区说明） */}
+        <div className="mt-4 flex items-start gap-2 rounded-2xl border border-card-border bg-[#FFFCFA] p-3 text-xs leading-6 text-muted">
+          <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+          <span>AI 按岗位库 FIFO 依次评分子，通过者自动生成招呼语并进入“确认投递”。当前待评分池 = 采集总数 − 初筛通过 − AI评分（{workbench.funnel['采集总数'] || 0} − {workbench.funnel['初筛通过'] || 0} − {workbench.funnel['AI评分'] || 0}）。</span>
+        </div>
+        {/* 发送窗口提示 */}
+        {workbench.send_window && (
+          <div className={"mt-2 flex items-start gap-2 rounded-2xl border px-3 py-2.5 text-xs leading-5 " + (workbench.send_window.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700")}>
+            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              发送窗口 {workbench.send_window.windows.join("、")}，当前{workbench.send_window.active ? "在窗口内，可正常发送" : "不在窗口内，发送任务会保留队列、到窗口后自动发出"}。
+              {!workbench.send_window.active && workbench.send_window.next && <span className="font-bold">{workbench.send_window.next}</span>}
+            </span>
+          </div>
+        )}
+        {/* 发送进行中：确认投递后实时展示“模拟浏览 / 正在发送 / 本轮已发送 / 待发送” */}
+        {sendProgress && (
+          <div className="mt-4 rounded-3xl border-2 border-primary/40 bg-[#FFF7F0] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Send className="h-4 w-4 text-primary" />
+                <div className="text-sm font-black">发送环节</div>
+                {sendProgress.remaining > 0 ? (
+                  <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-black text-primary">
+                    {sendProgress.phase === 'browsing'
+                      ? '模拟浏览中'
+                      : sendProgress.phase === 'opening'
+                        ? '打开岗位页中'
+                        : '正在输入发送'}
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-black text-emerald-600">本轮已完成</span>
+                )}
+              </div>
+              <div className="text-xs font-bold text-muted">
+                本轮已发送 <span className="text-primary">{sendProgress.sent}</span> / {sendProgress.total}
+                {sendProgress.remaining > 0 && <> · 待发送 <span className="text-primary">{sendProgress.remaining}</span></>}
+                {sendProgress.failed > 0 && <> · 失败 <span className="text-danger">{sendProgress.failed}</span></>}
+              </div>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-primary/15">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-500"
+                style={{ width: `${sendProgress.total ? Math.min(100, (sendProgress.sent / sendProgress.total) * 100) : 0}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted">
+              {sendProgress.remaining > 0
+                ? '模拟人类节奏：打开岗位页阅览片刻 → 输入打招呼语 → 发送，逐条进行；下方岗位列表会显示“锁定·正在发送”。'
+                : '本轮发送已完成，已发送岗位不重复锁定。发送全程不影响并行任务。'}
+            </p>
+          </div>
+        )}
+        {/* 任务状态区：全宽展示所有运行中任务（状态卡头部带模式标签对应）；任务失败时保留展示错误以便查看 */}
+        {statusTasks.length > 0 && (
+          <div className="mt-4 flex items-center gap-2">
+            <span className="text-sm font-black">任务运行状态</span>
+            {activeTasks.length > 0 ? (
+              <span className="rounded-full bg-[#FFF0E5] px-2.5 py-1 text-[11px] font-black text-primary">{statusTasks.length} 个任务运行中</span>
+            ) : (
+              <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-black text-danger">最近任务运行失败</span>
+            )}
+          </div>
+        )}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {statusTasks.map(task => (
+            <TaskStatusCard key={task.id} task={task} onStop={() => handleStopTask(task)} />
+          ))}
         </div>
         {notice && <div className="mt-3 rounded-2xl bg-[#FFF0E5] px-4 py-3 text-sm text-primary">{notice}</div>}
         {preflightChecks.some(check => check.status !== 'pass') && (
@@ -844,50 +1034,19 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         {error && <div className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-danger">{error}</div>}
       </section>
 
-      {/* ② 评分 —— 待评分池（自动进行，通过者自动生成招呼语） */}
-      <section className="rounded-3xl border border-card-border bg-white p-5">
-        <PipelineSectionHeader
-          seq="②"
-          title="评分"
-          description="评分自动进行，通过者自动生成招呼语。"
-          icon={<Star className="h-3.5 w-3.5" />}
-          right={
-            <span className="rounded-2xl border border-primary/20 bg-[#FFF0E5] px-4 py-2 text-sm font-black text-primary">
-              待评分池 {pendingScoreCount} 个
-            </span>
-          }
-        />
-        <div className="rounded-2xl border border-card-border bg-[#FFFCFA] p-4 text-sm leading-6 text-muted">
-          AI 按岗位库 FIFO 依次评分子，通过者自动生成招呼语并进入“③ 确认投递”。
-          当前待评分池数字 = 采集总数 − 初筛通过 − AI评分（{workbench.funnel['采集总数'] || 0} − {workbench.funnel['初筛通过'] || 0} − {workbench.funnel['AI评分'] || 0}）。
-        </div>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {([
-            { label: '采集总数', value: workbench.funnel['采集总数'] || 0 },
-            { label: '初筛通过', value: workbench.funnel['初筛通过'] || 0 },
-            { label: 'AI 评分', value: workbench.funnel['AI评分'] || 0 },
-          ]).map(item => (
-            <div key={item.label} className="rounded-2xl border border-card-border bg-white px-4 py-3">
-              <div className="text-[10px] font-bold text-muted">{item.label}</div>
-              <div className="mt-0.5 text-xl font-black tabular-nums">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* ③ 确认投递（打招呼合一）—— 今日待确认 + 待发送招呼语 */}
       <section className="rounded-3xl border border-primary/20 bg-[#FFF0E5] p-5">
         <PipelineSectionHeader
           seq="③"
-          title="确认投递（打招呼合一）"
-          description="确认即发送招呼语（打招呼），不再分两步：勾选后一键投递，已生成招呼语的岗位也会一并发出。"
+          title="确认投递"
+          description="勾选岗位后一键投递（打招呼），已生成招呼语的岗位一并发出。"
           icon={<Send className="h-3.5 w-3.5" />}
           right={
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setSelected(filteredTodayJobs.map(job => job.id))}>全选</Button>
+              <Button variant="secondary" size="sm" onClick={() => setSelected([...filteredTodayJobs.map(job => job.id), ...pendingGreetingJobs.map(job => job.id)])}>全选</Button>
               <Button variant="secondary" size="sm" onClick={() => setSelected([])}>清空</Button>
-              <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(actionableSelected)}>放弃已选 {actionableSelected.length} 个</Button>
-              <Button size="sm" onClick={() => confirmDeliver(actionableSelected)}>一键投递已选 {actionableSelected.length} 个</Button>
+              <Button variant="secondary" size="sm" disabled={actionableSelected.length === 0} onClick={() => rejectSelectedJobs(actionableSelected)}>放弃已选 {actionableSelected.length} 个</Button>
+              <Button size="sm" disabled={actionableSelected.length === 0} onClick={() => deliverSelection(actionableSelected)}>一键投递已选 {actionableSelected.length} 个</Button>
             </div>
           }
         />
@@ -927,42 +1086,44 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         )}
         {pendingGreetingJobs.length > 0 && (
           <>
-            <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <MessageCircle className="h-4 w-4 text-primary" />
-                <div className="text-sm font-black">已生成招呼语（可发）</div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => sendReadyGreetings(pendingGreetingJobs.map(job => job.id))}>发送全部 {pendingGreetingJobs.length} 个</Button>
-                <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs(pendingGreetingJobs.map(job => job.id))}>放弃全部</Button>
-              </div>
-            </div>
+            <div className="mt-5 mb-3 text-sm font-black">已生成招呼语（勾选后随上方「一键投递」一起发出）{sendingJobIds.size > 0 && <span className="ml-1 text-xs font-bold text-primary">· 已锁定 {sendingJobIds.size} 个正在发送</span>}</div>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {pendingGreetingJobs.map(job => (
-                <div key={job.id} className="rounded-2xl border border-primary/20 bg-white p-4">
+              {pendingGreetingJobs.map(job => {
+                const locked = sendingJobIds.has(job.id)
+                return (
+                <div key={job.id} className={"rounded-2xl border p-4 transition " + (locked ? 'border-primary/40 bg-[#FFF7F0]/70 opacity-80' : selected.includes(job.id) ? 'border-primary bg-[#FFF0E5]/40' : 'border-primary/20 bg-white')}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-black">{job.company}｜{job.title}</div>
-                      <div className="mt-1 text-xs text-primary">{job.score ? `匹配 ${job.score} · ` : ''}已生成招呼语，等待发送</div>
+                      <div className="mt-1 text-base font-black text-primary">{job.salary || '薪资未填'}</div>
+                      <div className="mt-1 text-xs text-primary">{job.score ? `匹配 ${job.score} · ` : ''}{locked ? '正在发送，无需重复操作' : '已生成招呼语，等待发送'}</div>
                     </div>
-                    <span className="rounded-full bg-[#FFF0E5] px-2 py-1 text-[11px] font-black text-primary">待发送</span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <input type="checkbox" checked={selected.includes(job.id)} disabled={locked} onChange={() => toggleJob(job.id)} className="h-4 w-4 accent-primary" title={locked ? '正在发送中，已锁定' : '勾选后可从上方批量投递'} />
+                      {locked ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-[11px] font-black text-white"><Lock className="h-3 w-3" />锁定·正在发送</span>
+                      ) : (
+                        <span className="rounded-full bg-[#FFF0E5] px-2 py-1 text-[11px] font-black text-primary">待发送</span>
+                      )}
+                    </div>
                   </div>
                   <p className="mt-3 line-clamp-2 text-sm leading-6 text-muted">{job.greeting || '招呼语已生成，等待发送。'}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => sendReadyGreetings([job.id])}>发送招呼语</Button>
-                    <Button size="sm" variant="secondary" onClick={() => openGreetingEditor(job)}><Pencil className="mr-2 h-4 w-4" />编辑招呼语</Button>
-                    <Button variant="secondary" size="sm" onClick={() => rejectSelectedJobs([job.id])}>放弃</Button>
+                    <Button size="sm" disabled={locked} onClick={() => sendReadyGreetings([job.id])}>{locked ? '正在发送' : '发送招呼语'}</Button>
+                    <Button size="sm" variant="secondary" disabled={locked} onClick={() => openGreetingEditor(job)}><Pencil className="mr-2 h-4 w-4" />编辑招呼语</Button>
+                    <Button variant="secondary" size="sm" disabled={locked} onClick={() => rejectSelectedJobs([job.id])}>{locked ? '发送中' : '放弃'}</Button>
                     <Button variant="secondary" size="sm" onClick={() => openJobDetail(job)}><Eye className="mr-2 h-4 w-4" />查看详情</Button>
                     <Button variant="secondary" size="sm" disabled={!job.url} onClick={() => window.open(job.url, '_blank', 'noopener,noreferrer')}><ExternalLink className="mr-2 h-4 w-4" />跳转岗位链接</Button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           </>
         )}
       </section>
 
-      {/* ④ 发送 —— 发送失败重试 */}
+      {/* ④ 发送 —— 失败重试 */}
       {workbench.send_errors.length > 0 && (
         <section className="rounded-3xl border border-red-100 bg-red-50 p-5">
           <PipelineSectionHeader
@@ -982,6 +1143,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="font-black">{job.company}｜{job.title}</div>
+                    <div className="mt-1 text-sm font-black text-danger">{job.salary || '薪资未填'}</div>
                     <div className="mt-1 text-xs text-danger">最近失败原因：{job.last_error || '发送失败，等待重试'}</div>
                   </div>
                   <span className="rounded-full bg-red-50 px-2 py-1 text-[11px] font-black text-danger">发送失败</span>
@@ -1057,7 +1219,9 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
           job={editGreetingJob}
           text={editGreetingText}
           saving={editGreetingSaving}
+          polishing={editGreetingPolishing}
           onChange={setEditGreetingText}
+          onPolish={polishGreetingText}
           onSave={saveGreeting}
           onClose={closeGreetingEditor}
         />
@@ -1123,18 +1287,106 @@ function JobDetailModal({ job, onClose }: { job: Job; onClose: () => void }) {
 }
 
 
+function TaskStatusCard({ task, onStop }: { task: WorkbenchTask; onStop?: () => void }) {
+  const taskError = task.error ? taskErrorFeedback(task.error) : null
+  const metricItems = visibleMetricItems(task)
+  const running = task.status === 'running' || task.status === 'stopping'
+  return (
+          <div key={task.id} className={"rounded-3xl border border-card-border bg-[#FFFCFA] p-4"}>
+            <div className={"flex flex-wrap items-start justify-between gap-3"}>
+              <div className="flex items-center gap-2">
+                {running && (
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
+                  </span>
+                )}
+                <div className={"text-sm font-black"}>{task.label}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {task.status === 'failed' && <span className="rounded-full bg-red-50 px-2 py-1 text-[11px] font-black text-danger">运行失败</span>}
+                {onStop && running && (
+                  <Button
+                    variant="secondary" size="sm"
+                    disabled={task.status === 'stopping'}
+                    onClick={onStop}
+                    title="仅停止此环节任务，其他并行任务不受影响"
+                  >
+                    <Square className="mr-1.5 h-3.5 w-3.5" />
+                    {task.status === 'stopping' ? '停止中' : '停止'}
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className={`mt-3 rounded-2xl border px-4 py-3 ${taskStatusClass(task.status)}`}>
+              <div className={"flex items-center justify-between gap-2"}>
+                <div className={"text-xs font-black tracking-wider text-primary"}>{taskStatusTitle(task.status)}</div>
+                <div className={"rounded-full px-2 py-0.5 text-[11px] font-black " + (
+                  task.status === 'failed'
+                    ? 'bg-red-50 text-danger'
+                    : task.status === 'stopping'
+                      ? 'bg-amber-50 text-amber-600'
+                      : running
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-[#F3F3F0] text-muted'
+                )}>
+                  {task.status === 'stopping' ? '正在停止' : taskStatusText(task.status)}
+                </div>
+              </div>
+              <div className={"mt-2 text-sm font-black text-foreground"}>{currentTaskStage(task.logs)}</div>
+              <TaskPipelineStages task={task} />
+              {task.deadline_at && (
+                <div className={"mt-1 text-xs font-bold text-muted"}>
+                  自动截止：{new Date(task.deadline_at).toLocaleString('zh-CN', { hour12: false })}
+                </div>
+              )}
+              {metricItems.length > 0 && (
+                <div className={
+                  "mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 " +
+                  (metricItems.length >= 5 ? 'lg:grid-cols-5' : metricItems.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3')
+                }>
+                  {metricItems.map(item => (
+                    <div key={item.key} className={"rounded-xl border border-card-border bg-white px-3 py-2"}>
+                      <div className={"text-[10px] font-bold text-muted"}>{item.label}</div>
+                      <div className={"mt-0.5 text-lg font-black " + (Number(task.metrics?.[item.key] ?? 0) > 0 ? 'text-foreground' : 'text-muted')}>{task.metrics?.[item.key] ?? 0}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {task.error && taskError && (
+              <div className={"mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-danger"}>
+                <div className={"font-black"}>{taskError.title}</div>
+                <p className={"mt-1 text-xs leading-5"}>{taskError.detail}</p>
+                <details className={"mt-2 text-xs text-muted"}>
+                  <summary className={"cursor-pointer font-bold"}>查看原始错误</summary>
+                  <pre className={"mt-2 whitespace-pre-wrap break-words rounded-lg bg-white p-2"}>{task.traceback || task.error}</pre>
+                </details>
+              </div>
+            )}
+            {task.stop_reason && <div className={"mt-3 rounded-2xl bg-[#FFF0E5] px-3 py-2 text-sm text-primary"}>{task.stop_reason}</div>}
+          </div>
+  )
+}
+
+
+
 function GreetingEditorModal({
   job,
   text,
   saving,
+  polishing,
   onChange,
+  onPolish,
   onSave,
   onClose,
 }: {
   job: Job
   text: string
   saving: boolean
+  polishing: boolean
   onChange: (value: string) => void
+  onPolish: () => void
   onSave: () => void
   onClose: () => void
 }) {
@@ -1156,9 +1408,13 @@ function GreetingEditorModal({
           rows={8}
           className="w-full resize-y rounded-2xl border border-card-border bg-[#FFFCFA] p-4 text-sm leading-6 outline-none focus:border-primary/50"
         />
-        <div className="mt-2 flex items-center justify-between gap-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <span className="text-xs text-muted">{text.length} 字（建议 50–150 字）</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={onPolish} disabled={polishing || saving || !text.trim()}>
+              <Sparkles className="mr-2 h-4 w-4" />
+              {polishing ? '润色中…' : 'AI 润色'}
+            </Button>
             <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>取消</Button>
             <Button size="sm" onClick={onSave} disabled={saving || !text.trim()}>
               {saving ? '保存中…' : '保存'}

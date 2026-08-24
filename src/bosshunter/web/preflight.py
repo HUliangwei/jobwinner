@@ -68,7 +68,7 @@ def check_ai_connection(config: dict, required: bool = True) -> list[dict[str, s
 				"AI API Key",
 				severity,
 				"尚未填写 AI API Key",
-				"打开“配置 → AI 设置”，填写 API Key 并保存。单独监测仍可启动，但无法生成 AI 回复或定制简历。",
+				"打开“配置 → AI 设置”，填写 API Key 并保存。监测仍可启动，但无法生成 AI 回复或定制简历。",
 				"config",
 			)
 		]
