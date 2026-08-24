@@ -4,7 +4,55 @@ import random
 import time
 from collections import deque
 from datetime import datetime
-from threading import Event
+from threading import Event, Lock
+
+
+class GlobalRequestGate:
+    """进程级共享的请求节奏闸门。
+
+    并行任务（发送/采集/监测）各自有自己的节流器基准节奏，但如果它们各自
+    记录自己的请求历史，从平台服务器（如 BOSS）的视角看请求会叠加翻倍，
+    爆发检测（burst detection）完全失效，触发风控的风险大幅上升。
+
+    这个闸门让所有任务共享同一个「近期请求时间戳」历史：
+    - 任何真实请求发生后调用 GlobalRequestGate.mark()；
+    - 任何任务发起下一次请求前，wait() 都叠加 burst_penalty()
+      （基于全局历史，而非只看本任务的局部节奏）。
+
+    效果：即使并行，整体请求节奏仍被约束在「一个人慢慢操作」的水平。
+    各任务仍保留自己的延时基准（发送 60-180s / 采集 2-5s），不会互相拖慢。
+    """
+
+    _lock = Lock()
+    _recent_times: deque = deque(maxlen=24)
+    _last_request_time = 0.0
+
+    @classmethod
+    def mark(cls) -> None:
+        """记录一次已发生的真实请求（发送成功/失败、打开搜索页、打开详情页）。"""
+        with cls._lock:
+            now = time.time()
+            cls._last_request_time = now
+            cls._recent_times.append(now)
+
+    @classmethod
+    def burst_penalty(cls) -> float:
+        """基于全局历史的爆发惩罚，供各任务 wait() 叠加。"""
+        with cls._lock:
+            if not cls._recent_times:
+                return 0.0
+            now = time.time()
+            recent_15s = sum(1 for ts in cls._recent_times if now - ts <= 15)
+            recent_45s = sum(1 for ts in cls._recent_times if now - ts <= 45)
+        # 阈值比局部节流略宽（全局里采集翻页也会计入），惩罚也相应温和，
+        # 目的是「整体节奏不翻倍」，而不是把每个任务都卡死。
+        if recent_45s >= 10:
+            return random.uniform(4.0, 7.0)
+        if recent_45s >= 7:
+            return random.uniform(2.0, 4.0)
+        if recent_15s >= 3:
+            return random.uniform(0.8, 2.0)
+        return 0.0
 
 
 class RequestThrottle:
@@ -14,7 +62,7 @@ class RequestThrottle:
         self._delay_min = delay_min
         self._delay_max = delay_max
         self._last_request_time = 0.0
-        self._recent_times: deque[float] = deque(maxlen=12)
+        self._recent_times: deque = deque(maxlen=12)
 
     def wait(self, stop_event: Event | None = None) -> bool:
         """Block until it's safe to send the next request."""
@@ -28,7 +76,8 @@ class RequestThrottle:
             base_sleep += random.uniform(2.0, 5.0)
 
         burst = self._burst_penalty()
-        total = max(0, base_sleep + burst)
+        global_penalty = GlobalRequestGate.burst_penalty()
+        total = max(0, base_sleep + burst + global_penalty)
         if total > 0:
             if stop_event and stop_event.wait(total):
                 return True
@@ -37,13 +86,14 @@ class RequestThrottle:
         return bool(stop_event and stop_event.is_set())
 
     def mark(self) -> None:
-        """Record that a request was just sent."""
+        """Record that a request was just sent (also mirrored to the global gate)."""
         now = time.time()
         self._last_request_time = now
         self._recent_times.append(now)
+        GlobalRequestGate.mark()
 
     def _burst_penalty(self) -> float:
-        """Extra delay when requests arrive in bursts."""
+        """Extra delay when requests arrive in bursts (local view)."""
         if not self._recent_times:
             return 0.0
         now = time.time()
@@ -64,7 +114,15 @@ class PageThrottle:
         self._delay_max = delay_max
 
     def wait(self, stop_event: Event | None = None) -> bool:
+        """Wait before opening the next search/detail page.
+
+        Opening a page is itself a real request to the platform, so it is also
+        counted in the global gate (mark) and slowed by any global burst penalty.
+        """
+        # 翻页/开页也算一次真实请求，先计入全局历史
+        GlobalRequestGate.mark()
         delay = random.uniform(self._delay_min, self._delay_max)
+        delay += GlobalRequestGate.burst_penalty()
         if stop_event:
             return stop_event.wait(delay)
         time.sleep(delay)
@@ -123,7 +181,6 @@ class SendWindowChecker:
         if not self._windows:
             return "无窗口限制"
         cur_minutes = self._current_minutes()
-        # Find next window start
         for start_h, start_m, end_h, end_m in sorted(self._windows):
             start_minutes = start_h * 60 + start_m
             if cur_minutes < start_minutes:
@@ -135,25 +192,25 @@ class SendWindowChecker:
         return ""
 
     @staticmethod
-    def _current_minutes() -> int:
-        now = datetime.now()
-        return now.hour * 60 + now.minute
-
-    @staticmethod
-    def _parse_time(s: str) -> tuple[int, int]:
-        """Parse 'HH:MM' to (hour, minute)."""
-        parts = s.strip().split(":")
+    def _parse_time(value: str) -> tuple[int, int]:
+        """Return (hour, minute) for a 'HH:MM' string, or (-1,-1) when invalid."""
+        parts = str(value).strip().split(":")
         if len(parts) == 2:
             try:
                 hour, minute = int(parts[0]), int(parts[1])
                 if hour == 24 and minute == 0:
-                	# "24:00" means end of day; treat as 23:59 so window stays active
-                	return 23, 59
+                    # "24:00" means end of day; treat as 23:59 so window stays active
+                    return 23, 59
                 if 0 <= hour <= 23 and 0 <= minute <= 59:
                     return hour, minute
             except ValueError:
                 pass
         return -1, -1
+
+    @staticmethod
+    def _current_minutes() -> int:
+        now = datetime.now()
+        return now.hour * 60 + now.minute
 
 
 class ProgressiveBackoff:
