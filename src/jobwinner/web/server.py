@@ -2401,6 +2401,36 @@ def error500(error):
 
 # ─── Run ─────────────────────────────────────────────────
 
+@app.route("/api/shutdown", method="POST")
+def api_shutdown():
+	"""完全退出服务：停 CDP 代理 + 停 web 进程（网页点『退出服务』触发）。
+
+	等效于关闭终端：停止后台任务后进程退出，cmd 启动窗口随之关闭。
+	"""
+	try:
+		# 1) 尽量停止所有工作台任务（采集/评分/监测/发送）
+		try:
+			from jobwinner.web.tasks import task_runner
+			status = task_runner.status()
+			active = status.get("active_tasks") or []
+			for task_id in active:
+				try:
+					task_runner.stop(str(task_id), reason="用户请求退出服务")
+				except Exception:
+					pass
+		except Exception:
+			pass
+		# 2) 停 CDP 浏览器代理（node 3456）
+		_stop_cdp_proxy()
+		# 3) 停 web 服务（进程退出，终端窗口随之关闭）
+		print("[jobwinner] 收到退出请求，服务已停止。窗口可关闭。")
+		import threading as _th
+		_th.Timer(0.8, lambda: os._exit(0)).start()
+		return _json_response({"ok": True, "message": "服务已停止"})
+	except Exception as exc:
+		return _json_response({"error": f"退出失败: {exc}"}, 500)
+
+
 def _stop_cdp_proxy() -> None:
 	"""Kill the CDP browser-runtime proxy (node process on proxy_port 3456)."""
 	try:
