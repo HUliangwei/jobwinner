@@ -145,12 +145,18 @@ channels:
   - `executor/sender.py` / `monitor.py` — 锁名、chat_url 默认值、域名判断改为读取活动渠道（行为不变）
   - `config.yaml` / `config.example.yaml` — 新增 `channels.active`（默认 `bosszp`，行为不变）
   - `tests/test_channels.py` — 15 项渠道层测试
+- **配置化渠道选择（阶段 B 已完成）**：
+  - `db.py` — `jobs` 表新增 `channel` 列（默认 `bosszp`），`_migrate_v1_6` 兼容历史库；`insert_job` 写入 channel；`query_jobs` 支持 `channel=` 筛选
+  - `scraper/jobs.py` — 采集写入 `channel`（来源 adapter.key）
+  - `web/server.py` — `/api/jobs?channel=` 服务端筛选
+  - 前端 — `JobFilterBar` 渠道下拉 + `JobsTable` 渠道徽标（`CHANNEL_LABELS` 映射，后续渠道在此追加）
+  - `tests/test_db_channel.py` — 4 项 channel 列测试
 
 ---
 
 ## 7. 交接状态
 
-- 代码基线：master @ c6a3c12（含渠道抽象层阶段 A，全部已推送 origin/master）
+- 代码基线：master @ 43d5fb1（含渠道抽象层阶段 A + 配置化阶段 B，全部已推送 origin/master）
 - 仓库公开：是（https://github.com/HUliangwei/jobwinner）
 - 隐私：config.yaml / data/ / *.db / 简历 全部 .gitignore，公开仓库无敏感数据
-- 下一步：**阶段 B（配置化 + DB channel 列）**或**阶段 C（新增首个非 boss 渠道验证抽象）**，见第 3 节
+- 下一步：**阶段 C（新增首个非 boss 渠道验证抽象）**，见第 3 节

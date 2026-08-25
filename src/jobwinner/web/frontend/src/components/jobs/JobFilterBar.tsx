@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { STATUS_LABELS } from '@/lib/status'
-import { hasActiveJobFilters, type JobFilters } from '@/lib/jobFilters'
+import { hasActiveJobFilters, CHANNEL_LABELS, type JobFilters } from '@/lib/jobFilters'
 
 interface JobFilterBarProps {
   filters: JobFilters
@@ -71,6 +71,12 @@ export function JobFilterBar({
           className="min-w-0"
           aria-label="最高薪资 K"
         />
+        <Select className="min-w-0" value={filters.channel} onChange={event => update('channel', event.target.value)} aria-label="渠道">
+          <option value="">渠道：全部</option>
+          {Object.entries(CHANNEL_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </Select>
         {showStatus && (
           <Select className="min-w-0" value={filters.status} onChange={event => update('status', event.target.value)} aria-label="岗位状态">
             <option value="">全部状态</option>

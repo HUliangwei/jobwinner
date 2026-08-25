@@ -60,7 +60,8 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             greeting TEXT,
             status TEXT DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            channel TEXT DEFAULT 'bosszp'
         );
 
         CREATE TABLE IF NOT EXISTS history (
@@ -90,6 +91,7 @@ def _init_tables(conn: sqlite3.Connection) -> None:
     _migrate_v1_3(conn)
     _migrate_v1_4(conn)
     _migrate_v1_5(conn)
+    _migrate_v1_6(conn)
     _init_scoring_runs(conn)
 
 
@@ -130,8 +132,12 @@ def query_jobs(
     job_ids: Any = None,
     limit: int | None = None,
     offset: int = 0,
+    channel: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Query jobs with a single active/recycle-bin semantic."""
+    """Query jobs with a single active/recycle-bin semantic.
+
+    ``channel`` optionally filters by the channel adapter key (e.g. 'bosszp').
+    """
     if deleted not in {"active", "only", "all"}:
         raise ValueError("deleted 参数无效")
     if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500):
@@ -148,6 +154,9 @@ def query_jobs(
     if ids is not None:
         conditions.append(f"id IN ({','.join('?' for _ in ids)})")
         params.extend(ids)
+    if channel:
+        conditions.append("channel = ?")
+        params.append(channel)
     where_sql = f" WHERE {' AND '.join(conditions)}" if conditions else ""
     total = int(conn.execute(f"SELECT COUNT(*) AS cnt FROM jobs{where_sql}", params).fetchone()["cnt"])
     query_params = list(params)
@@ -302,13 +311,19 @@ def permanent_delete_jobs(
 
 
 def insert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> None:
-    """Insert a new job record."""
+    """Insert a new job record.
+
+    ``job["channel"]`` (optional) records the channel adapter key; defaults to
+    'bosszp' for backward compatibility with historical collectors.
+    """
+    record = dict(job)
+    record.setdefault("channel", "bosszp")
     conn.execute("""
         INSERT OR IGNORE INTO jobs (id, title, company, salary, city, experience, jd,
-            hr_name, hr_title, hr_active, company_size, company_industry, url)
+            hr_name, hr_title, hr_active, company_size, company_industry, url, channel)
         VALUES (:id, :title, :company, :salary, :city, :experience, :jd,
-            :hr_name, :hr_title, :hr_active, :company_size, :company_industry, :url)
-    """, job)
+            :hr_name, :hr_title, :hr_active, :company_size, :company_industry, :url, :channel)
+    """, record)
     conn.commit()
 
 
@@ -471,6 +486,20 @@ def _migrate_v1_5(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
     if "stage_source" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN stage_source TEXT DEFAULT 'manual'")
+    conn.commit()
+
+
+def _migrate_v1_6(conn: sqlite3.Connection) -> None:
+    """Add channel column (multi-channel abstraction key, e.g. 'bosszp').
+
+    Historical rows get the default 'bosszp'. Rows whose ``source`` is
+    'portal' (官网投递) keep ``source`` semantics and channel defaults to
+    'bosszp' only for sender/monitor compatibility; portal rows are not part
+    of any channel adapter pipeline.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "channel" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN channel TEXT DEFAULT 'bosszp'")
     conn.commit()
 
 

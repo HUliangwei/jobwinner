@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { getStatusLabel } from '@/lib/status'
+import { getChannelLabel } from '@/lib/jobFilters'
 import type { Job } from '@/hooks/useDashboard'
 
 interface JobsTableProps {
@@ -76,6 +77,7 @@ export function JobsTable({ jobs, page, pageSize, total, onPageChange, selectedI
                 <th className="px-4 py-3 text-left font-bold">职位</th>
                 <th className="px-4 py-3 text-left font-bold">薪资</th>
                 <th className="px-4 py-3 text-left font-bold">评分</th>
+                <th className="px-4 py-3 text-left font-bold">渠道</th>
                 <th className="px-4 py-3 text-left font-bold">状态</th>
                 <th className="px-4 py-3 text-left font-bold">招聘者活跃</th>
                 <th className="px-4 py-3 text-left font-bold">时间</th>
@@ -114,6 +116,15 @@ export function JobsTable({ jobs, page, pageSize, total, onPageChange, selectedI
                         <span className={`font-mono font-black ${getScoreColor(job.score)}`}>{job.score || '-'}</span>
                       </td>
                       <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1">
+                          {job.channel && job.channel !== 'bosszp' ? (
+                            <Badge variant="default">{getChannelLabel(job.channel)}</Badge>
+                          ) : (
+                            <span className="text-xs text-muted">{getChannelLabel(job.channel)}</span>
+                          )}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
                         <Badge variant={statusVariant(job.status) as any}>{getStatusLabel(job.status)}</Badge>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted">{job.hr_active || '活跃度未知'}</td>
@@ -133,7 +144,7 @@ export function JobsTable({ jobs, page, pageSize, total, onPageChange, selectedI
                     </tr>
                     {isExpanded && (
                       <tr className="border-b border-card-border bg-[#FFFCFA]">
-                        <td colSpan={onSoftDelete ? 9 : 8} className="px-6 py-4">
+                        <td colSpan={onSoftDelete ? 10 : 9} className="px-6 py-4">
                           <div className="grid grid-cols-1 gap-4 text-sm lg:grid-cols-3">
                             <div className="rounded-2xl border border-card-border bg-white p-4">
                               <p className="mb-2 text-xs font-black text-primary">JD摘要</p>
@@ -156,7 +167,7 @@ export function JobsTable({ jobs, page, pageSize, total, onPageChange, selectedI
               })}
               {!jobs.length && (
                 <tr>
-                  <td colSpan={onSoftDelete ? 9 : 8} className="px-4 py-10 text-center text-sm text-muted">
+                  <td colSpan={onSoftDelete ? 10 : 9} className="px-4 py-10 text-center text-sm text-muted">
                     {loading ? '正在读取岗位…' : '没有符合当前条件的岗位'}
                   </td>
                 </tr>

@@ -8,6 +8,7 @@ export interface JobFilters {
   salaryMax: string
   status: string
   createdWithin: string
+  channel: string
 }
 
 export const EMPTY_JOB_FILTERS: JobFilters = {
@@ -17,6 +18,19 @@ export const EMPTY_JOB_FILTERS: JobFilters = {
   salaryMax: '',
   status: '',
   createdWithin: '',
+  channel: '',
+}
+
+export const CHANNEL_LABELS: Record<string, string> = {
+  bosszp: 'Boss直聘',
+  // 后续渠道在此追加，例如：
+  // liepin: '猎聘',
+  // qiancheng: '前程无忧',
+}
+
+export function getChannelLabel(channel?: string | null) {
+  const key = channel || 'bosszp'
+  return CHANNEL_LABELS[key] || key
 }
 
 export function useDebouncedValue<T>(value: T, delay: number) {
@@ -88,6 +102,7 @@ export function filterJobs(jobs: Job[], filters: JobFilters) {
 
   return jobs.filter(job => {
     if (!matchesCreatedWithin(job.created_at, filters.createdWithin)) return false
+    if (filters.channel && (job.channel || 'bosszp') !== filters.channel) return false
     if (keyword) {
       const searchable = [job.title, job.company, job.jd, job.score_reason]
         .join('\n')

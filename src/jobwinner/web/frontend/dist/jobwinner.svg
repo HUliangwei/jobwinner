@@ -2,20 +2,20 @@
   <defs>
     <linearGradient id="jwGrad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#FF8A3D"/>
-      <stop offset="100%" stop-color="#F04F00"/>
+      <stop offset="100%" stop-color="#FB6511"/>
     </linearGradient>
   </defs>
-  <!-- 深色圆角底 -->
-  <rect x="2" y="2" width="60" height="60" rx="13" fill="#0F172A"/>
-  <!-- 粗准星环（大而醒目） -->
-  <circle cx="32" cy="32" r="22" fill="none" stroke="url(#jwGrad)" stroke-width="7"/>
-  <!-- 中心实心靶心 -->
-  <circle cx="32" cy="32" r="10" fill="url(#jwGrad)"/>
-  <!-- 白色 JW 箭头（主动出击 + 推进） -->
-  <path d="M32 25 L32 39 M27.5 30.5 L32 35.5 L36.5 30.5" stroke="#FFFFFF" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- 四个准星刻度（外延到边） -->
-  <line x1="32" y1="0" x2="32" y2="10" stroke="#FB6511" stroke-width="3.5" stroke-linecap="round"/>
-  <line x1="32" y1="54" x2="32" y2="64" stroke="#FB6511" stroke-width="3.5" stroke-linecap="round"/>
-  <line x1="0" y1="32" x2="10" y2="32" stroke="#FB6511" stroke-width="3.5" stroke-linecap="round"/>
-  <line x1="54" y1="32" x2="64" y2="32" stroke="#FB6511" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- 背景圆角方块 -->
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#111827"/>
+  <!-- 准星环（猎手精准定位） -->
+  <circle cx="32" cy="32" r="20" fill="none" stroke="url(#jwGrad)" stroke-width="4"/>
+  <circle cx="32" cy="32" r="9" fill="url(#jwGrad)"/>
+  <!-- 准星刻度 -->
+  <line x1="32" y1="2" x2="32" y2="12" stroke="#FB6511" stroke-width="3" stroke-linecap="round"/>
+  <line x1="32" y1="52" x2="32" y2="62" stroke="#FB6511" stroke-width="3" stroke-linecap="round"/>
+  <line x1="2" y1="32" x2="12" y2="32" stroke="#FB6511" stroke-width="3" stroke-linecap="round"/>
+  <line x1="52" y1="32" x2="62" y2="32" stroke="#FB6511" stroke-width="3" stroke-linecap="round"/>
+  <!-- 中心 JW 交叉箭头（向上箭头=主动，向右箭头=推进） -->
+  <path d="M32 22 L32 34 M26 28 L32 34 L38 28" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M28 26 L32 30 L36 26" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

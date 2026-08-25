@@ -254,6 +254,7 @@ def scrape_jobs(
                         "company_size": detail.get("company_size", ""),
                         "company_industry": detail.get("company_industry", ""),
                         "url": detail_url,
+                        "channel": channel.key,
                     }
 
                     if matching_deal_breaker(job_record["jd"], jd_deal_breakers):

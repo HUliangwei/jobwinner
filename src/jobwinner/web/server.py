@@ -967,6 +967,7 @@ def api_jobs():
 		deleted = request.params.get("deleted", "active").strip()
 		limit = int(request.params.get("limit", 100))
 		offset = int(request.params.get("offset", 0))
+		channel = (request.params.get("channel") or "").strip() or None
 		if deleted not in {"active", "only", "all"} or not 1 <= limit <= 500 or offset < 0:
 			raise ValueError("岗位查询参数无效")
 	except (TypeError, ValueError) as exc:
@@ -974,7 +975,7 @@ def api_jobs():
 
 	db = _get_web_db()
 	try:
-		jobs, total = query_jobs(db, deleted=deleted, limit=limit, offset=offset)
+		jobs, total = query_jobs(db, deleted=deleted, limit=limit, offset=offset, channel=channel)
 		response.headers["X-Total-Count"] = str(total)
 		return _json_response(jobs)
 	finally:
