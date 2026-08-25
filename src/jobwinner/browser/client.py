@@ -39,7 +39,7 @@ class RuntimeClient:
     def back(self, target_id: str) -> bool:
         return self._get_ok("/back", params={"target": target_id}, timeout=10)
 
-    def evaluate(self, target_id: str, expression: str, timeout: float = 30) -> Any:
+    def evaluate(self, target_id: str, expression: str, timeout: float = 12) -> Any:
         try:
             response = httpx.post(
                 f"{self.base_url}/eval",

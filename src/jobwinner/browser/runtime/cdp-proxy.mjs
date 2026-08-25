@@ -234,8 +234,14 @@ function sendCDP(method, params = {}, sessionId = null) {
     if (sessionId) msg.sessionId = sessionId;
     const timer = setTimeout(() => {
       pending.delete(id);
+      // target 可能已失效/关闭：清掉该 session，下次 ensureSession 自动重连
+      if (sessionId) {
+        for (const [tid, sid] of sessions.entries()) {
+          if (sid === sessionId) sessions.delete(tid);
+        }
+      }
       reject(new Error(`CDP command timeout: ${method}`));
-    }, 30000);
+    }, 5000);
     pending.set(id, { resolve, timer });
     ws.send(JSON.stringify(msg));
   });
