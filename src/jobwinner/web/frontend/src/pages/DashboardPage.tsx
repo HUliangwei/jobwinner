@@ -1090,18 +1090,21 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {pendingGreetingJobs.map(job => {
                 const locked = sendingJobIds.has(job.id)
+                const failed = job.status === 'error' || !!job.last_error
                 return (
-                <div key={job.id} className={"rounded-2xl border p-4 transition " + (locked ? 'border-primary/40 bg-[#FFF7F0]/70 opacity-80' : selected.includes(job.id) ? 'border-primary bg-[#FFF0E5]/40' : 'border-primary/20 bg-white')}>
+                <div key={job.id} className={"rounded-2xl border p-4 transition " + (locked ? 'border-primary/40 bg-[#FFF7F0]/70 opacity-80' : failed ? 'border-red-200 bg-red-50/60' : selected.includes(job.id) ? 'border-primary bg-[#FFF0E5]/40' : 'border-primary/20 bg-white')}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-black">{job.company}｜{job.title}</div>
                       <div className="mt-1 text-base font-black text-primary">{job.salary || '薪资未填'}</div>
-                      <div className="mt-1 text-xs text-primary">{job.score ? `匹配 ${job.score} · ` : ''}{locked ? '正在发送，无需重复操作' : '已生成招呼语，等待发送'}</div>
+                      <div className="mt-1 text-xs text-primary">{job.score ? `匹配 ${job.score} · ` : ''}{locked ? '正在发送，无需重复操作' : failed ? `发送失败：${job.last_error || '请重试'}` : '已生成招呼语，等待发送'}</div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <input type="checkbox" checked={selected.includes(job.id)} disabled={locked} onChange={() => toggleJob(job.id)} className="h-4 w-4 accent-primary" title={locked ? '正在发送中，已锁定' : '勾选后可从上方批量投递'} />
                       {locked ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-[11px] font-black text-white"><Lock className="h-3 w-3" />锁定·正在发送</span>
+                      ) : failed ? (
+                        <span className="rounded-full bg-red-100 px-2 py-1 text-[11px] font-black text-danger">发送失败</span>
                       ) : (
                         <span className="rounded-full bg-[#FFF0E5] px-2 py-1 text-[11px] font-black text-primary">待发送</span>
                       )}

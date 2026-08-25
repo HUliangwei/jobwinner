@@ -1291,6 +1291,24 @@ def _send_window_info(config):
 	}
 
 
+def _merge_pending_greetings(db) -> list[dict]:
+	"""待发送列表 = 正常待发岗位（ready/approved）＋ 发送失败岗位（error）。
+	发送失败岗位保留在待发送列表并附 last_error（最近一次失败原因），
+	前端据此显示「发送失败」标记；它们不会自动重发（get_jobs_ready_to_send
+	仍只选 ready/approved），需要用户手动勾选重试。"""
+	jobs = list(get_jobs_ready_to_send(db))
+	failed = get_jobs_with_send_errors(db)
+	if failed:
+		for job in failed:
+			row = db.execute(
+				"SELECT detail FROM history WHERE job_id=? AND action='error' ORDER BY created_at DESC LIMIT 1",
+				(job["id"],),
+			).fetchone()
+			job["last_error"] = row["detail"] if row else ("发送失败(%s)" % job.get("status", "error"))
+		jobs.extend(failed)
+	return jobs
+
+
 @app.route("/api/workbench")
 def api_workbench():
 	db = _get_web_db()
@@ -1304,7 +1322,7 @@ def api_workbench():
 				job for job in get_jobs_pending_confirmation(db)
 				if int(job.get("score") or 0) >= threshold
 			],
-			"pending_greetings": get_jobs_ready_to_send(db),
+			"pending_greetings": _merge_pending_greetings(db),
 			"send_errors": get_jobs_with_send_errors(db),
 			"send_window": _send_window_info(load_config(CONFIG_PATH)),
 			"needs_resume": get_jobs_needing_resume(db),
