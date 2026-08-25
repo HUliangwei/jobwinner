@@ -101,7 +101,7 @@ class WebApiRouteTests(unittest.TestCase):
         return status_headers["status"], status_headers["headers"], body
 
     def _upload_resume(self, filename: str, content: bytes, content_type: str):
-        boundary = "----BossHunterResumeUpload"
+        boundary = "----JobWinnerResumeUpload"
         body = (
             (
                 f'--{boundary}\r\n'

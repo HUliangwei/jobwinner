@@ -194,9 +194,9 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             start_runtime({"browser": {"proxy_port": 4567, "chrome_ports": [9222, 9333], "enable_port_guard": False}})
 
         env = popen.call_args.kwargs["env"]
-        self.assertEqual(env["BOSSHUNTER_BROWSER_PROXY_PORT"], "4567")
-        self.assertEqual(env["BOSSHUNTER_CHROME_PORTS"], "9222,9333")
-        self.assertEqual(env["BOSSHUNTER_ENABLE_PORT_GUARD"], "false")
+        self.assertEqual(env["JOBWINNER_BROWSER_PROXY_PORT"], "4567")
+        self.assertEqual(env["JOBWINNER_CHROME_PORTS"], "9222,9333")
+        self.assertEqual(env["JOBWINNER_ENABLE_PORT_GUARD"], "false")
 
 
 class BrowserRuntimeSourceTests(unittest.TestCase):

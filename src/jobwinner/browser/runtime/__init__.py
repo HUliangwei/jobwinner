@@ -1,4 +1,4 @@
-"""Built-in BossHunter Browser Runtime management."""
+"""Built-in JobWinner Browser Runtime management."""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def _candidate_node_executables() -> list[str]:
             candidates.append(value)
 
     # Explicit override stays first for managed and packaged installations.
-    add(os.environ.get("BOSSHUNTER_NODE_PATH"))
+    add(os.environ.get("JOBWINNER_NODE_PATH") or os.environ.get("BOSSHUNTER_NODE_PATH"))
     add(shutil.which("node"))
     # Keep the command name as a fallback so shell-managed installations and
     # existing tests continue to work even when `which` is unavailable.
@@ -172,13 +172,13 @@ def runtime_health(config: dict[str, Any] | None = None) -> dict[str, Any] | Non
 
 
 def is_jobwinner_runtime(config: dict[str, Any] | None = None) -> bool:
-    """Return True only when the local service identifies as BossHunter Runtime."""
+    """Return True only when the local service identifies as JobWinner Runtime."""
     health = runtime_health(config)
     return bool(health and health.get("runtime") == "jobwinner")
 
 
 def runtime_targets(config: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
-    """Return runtime page targets when Chrome and BossHunter Runtime are ready."""
+    """Return runtime page targets when Chrome and JobWinner Runtime are ready."""
     if not is_jobwinner_runtime(config):
         return None
     try:
@@ -225,9 +225,11 @@ def _switch_runtime_port(config: dict[str, Any] | None, browser: dict[str, Any],
 def _runtime_env(config: dict[str, Any] | None = None) -> dict[str, str]:
     browser = get_browser_config(config)
     env = os.environ.copy()
-    env["BOSSHUNTER_BROWSER_PROXY_PORT"] = str(browser.get("proxy_port", 3456))
-    env["BOSSHUNTER_CHROME_PORTS"] = ",".join(str(port) for port in browser.get("chrome_ports", [9222, 9229, 9333]))
-    env["BOSSHUNTER_ENABLE_PORT_GUARD"] = "true" if browser.get("enable_port_guard", True) else "false"
+    # JobWinner env names; legacy BOSSHUNTER_* vars are still honored by the
+    # bundled runtime scripts so existing shells keep working unchanged.
+    env["JOBWINNER_BROWSER_PROXY_PORT"] = str(browser.get("proxy_port", 3456))
+    env["JOBWINNER_CHROME_PORTS"] = ",".join(str(port) for port in browser.get("chrome_ports", [9222, 9229, 9333]))
+    env["JOBWINNER_ENABLE_PORT_GUARD"] = "true" if browser.get("enable_port_guard", True) else "false"
     return env
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// BossHunter Browser Runtime standalone readiness check.
+// JobWinner Browser Runtime standalone readiness check.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -10,8 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PROXY_SCRIPT = path.join(ROOT, 'cdp-proxy.mjs');
-const PROXY_PORT = Number(process.env.BOSSHUNTER_BROWSER_PROXY_PORT || process.env.CDP_PROXY_PORT || 3456);
-const COMMON_PORTS = String(process.env.BOSSHUNTER_CHROME_PORTS || '9222,9229,9333')
+const PROXY_PORT = Number(process.env.JOBWINNER_BROWSER_PROXY_PORT || process.env.BOSSHUNTER_BROWSER_PROXY_PORT || process.env.CDP_PROXY_PORT || 3456);
+const COMMON_PORTS = String(process.env.JOBWINNER_CHROME_PORTS || process.env.BOSSHUNTER_CHROME_PORTS || '9222,9229,9333')
   .split(',')
   .map((value) => parseInt(value.trim(), 10))
   .filter((value) => value > 0 && value < 65536);
@@ -80,12 +80,12 @@ async function httpGetJson(url, timeoutMs = 3000) {
 }
 
 function startProxyDetached() {
-  const logFile = path.join(os.tmpdir(), 'bosshunter-browser-runtime.log');
+  const logFile = path.join(os.tmpdir(), 'jobwinner-browser-runtime.log');
   const logFd = fs.openSync(logFile, 'a');
   const child = spawn(process.execPath, [PROXY_SCRIPT], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: { ...process.env, BOSSHUNTER_BROWSER_PROXY_PORT: String(PROXY_PORT) },
+    env: { ...process.env, JOBWINNER_BROWSER_PROXY_PORT: String(PROXY_PORT) },
     ...(os.platform() === 'win32' ? { windowsHide: true } : {}),
   });
   child.unref();
@@ -93,7 +93,7 @@ function startProxyDetached() {
   return logFile;
 }
 
-async function isBossHunterRuntime() {
+async function isJobWinnerRuntime() {
   const health = await httpGetJson(`http://127.0.0.1:${PROXY_PORT}/health`);
   return health?.runtime === 'jobwinner';
 }
@@ -101,7 +101,7 @@ async function isBossHunterRuntime() {
 async function ensureProxy() {
   const targetsUrl = `http://127.0.0.1:${PROXY_PORT}/targets`;
   const existing = await httpGetJson(targetsUrl);
-  if (Array.isArray(existing) && await isBossHunterRuntime()) {
+  if (Array.isArray(existing) && await isJobWinnerRuntime()) {
     console.log(`runtime: ready (http://127.0.0.1:${PROXY_PORT})`);
     return true;
   }
@@ -112,7 +112,7 @@ async function ensureProxy() {
 
   for (let i = 1; i <= 15; i++) {
     const result = await httpGetJson(targetsUrl, 8000);
-    if (Array.isArray(result) && await isBossHunterRuntime()) {
+    if (Array.isArray(result) && await isJobWinnerRuntime()) {
       console.log(`runtime: ready (http://127.0.0.1:${PROXY_PORT})`);
       return true;
     }

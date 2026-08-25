@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// BossHunter Browser Runtime - local HTTP-to-CDP bridge for the user's Chrome session.
+// JobWinner Browser Runtime - local HTTP-to-CDP bridge for the user's Chrome session.
 // Requires Chrome remote debugging and Node.js 22+ (or the ws module fallback).
 
 import http from 'node:http';
@@ -9,9 +9,9 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 
-const PORT = parseInt(process.env.BOSSHUNTER_BROWSER_PROXY_PORT || process.env.CDP_PROXY_PORT || '3456', 10);
-const ENABLE_PORT_GUARD = !['0', 'false', 'no'].includes(String(process.env.BOSSHUNTER_ENABLE_PORT_GUARD || 'true').toLowerCase());
-const COMMON_PORTS = String(process.env.BOSSHUNTER_CHROME_PORTS || '9222,9229,9333')
+const PORT = parseInt(process.env.JOBWINNER_BROWSER_PROXY_PORT || process.env.BOSSHUNTER_BROWSER_PROXY_PORT || process.env.CDP_PROXY_PORT || '3456', 10);
+const ENABLE_PORT_GUARD = !['0', 'false', 'no'].includes(String(process.env.JOBWINNER_ENABLE_PORT_GUARD || process.env.BOSSHUNTER_ENABLE_PORT_GUARD || 'true').toLowerCase());
+const COMMON_PORTS = String(process.env.JOBWINNER_CHROME_PORTS || process.env.BOSSHUNTER_CHROME_PORTS || '9222,9229,9333')
   .split(',')
   .map((value) => parseInt(value.trim(), 10))
   .filter((value) => value > 0 && value < 65536);
@@ -36,7 +36,7 @@ if (typeof globalThis.WebSocket !== 'undefined') {
   try {
     WS = (await import('ws')).default;
   } catch {
-    console.error('[BossHunter Browser Runtime] Node.js < 22 requires ws. Upgrade Node.js or install ws.');
+    console.error('[JobWinner Browser Runtime] Node.js < 22 requires ws. Upgrade Node.js or install ws.');
     process.exit(1);
   }
 }
@@ -100,7 +100,7 @@ async function discoverChromePort() {
           : filePath.includes('Chrome Canary')
             ? 'Google Chrome Canary'
             : 'Google Chrome';
-        console.log(`[BossHunter Browser Runtime] DevToolsActivePort: ${port}${wsPath ? ' with wsPath' : ''}`);
+        console.log(`[JobWinner Browser Runtime] DevToolsActivePort: ${port}${wsPath ? ' with wsPath' : ''}`);
         return { port, wsPath, product: version?.Browser || null, browserName };
       }
     } catch {}
@@ -116,7 +116,7 @@ async function discoverChromePort() {
           : product?.startsWith('Chrome/')
             ? 'Google Chrome'
             : product || '未知浏览器';
-        console.log(`[BossHunter Browser Runtime] Found Chrome debug port: ${port}`);
+        console.log(`[JobWinner Browser Runtime] Found Chrome debug port: ${port}`);
         return { port, wsUrl: version.webSocketDebuggerUrl, product, browserName };
       }
     }
@@ -154,7 +154,7 @@ async function connect() {
     const onOpen = () => {
       cleanup();
       connectingPromise = null;
-      console.log(`[BossHunter Browser Runtime] Connected to Chrome port ${chromePort}`);
+      console.log(`[JobWinner Browser Runtime] Connected to Chrome port ${chromePort}`);
       resolve();
     };
     const onError = (event) => {
@@ -167,11 +167,11 @@ async function connect() {
       chromeProduct = null;
       chromeName = null;
       const msg = event.message || event.error?.message || 'connection failed';
-      console.error('[BossHunter Browser Runtime] Connection error:', msg);
+      console.error('[JobWinner Browser Runtime] Connection error:', msg);
       reject(new Error(msg));
     };
     const onClose = () => {
-      console.log('[BossHunter Browser Runtime] Chrome connection closed');
+      console.log('[JobWinner Browser Runtime] Chrome connection closed');
       ws = null;
       chromePort = null;
       chromeWsPath = null;
@@ -601,24 +601,24 @@ async function main() {
   const available = await checkPortAvailable(PORT);
   if (!available) {
     if (await existingRuntimeHealthy(PORT)) {
-      console.log(`[BossHunter Browser Runtime] Existing runtime is running on port ${PORT}`);
+      console.log(`[JobWinner Browser Runtime] Existing runtime is running on port ${PORT}`);
       process.exit(0);
     }
-    console.error(`[BossHunter Browser Runtime] Port ${PORT} is occupied by another service`);
+    console.error(`[JobWinner Browser Runtime] Port ${PORT} is occupied by another service`);
     process.exit(1);
   }
 
   server.listen(PORT, '127.0.0.1', () => {
-    console.log(`[BossHunter Browser Runtime] Listening on http://127.0.0.1:${PORT}`);
-    connect().catch((error) => console.error('[BossHunter Browser Runtime] Initial Chrome connection failed:', error.message));
+    console.log(`[JobWinner Browser Runtime] Listening on http://127.0.0.1:${PORT}`);
+    connect().catch((error) => console.error('[JobWinner Browser Runtime] Initial Chrome connection failed:', error.message));
   });
 }
 
 process.on('uncaughtException', (error) => {
-  console.error('[BossHunter Browser Runtime] Uncaught exception:', error.message);
+  console.error('[JobWinner Browser Runtime] Uncaught exception:', error.message);
 });
 process.on('unhandledRejection', (error) => {
-  console.error('[BossHunter Browser Runtime] Unhandled rejection:', error?.message || error);
+  console.error('[JobWinner Browser Runtime] Unhandled rejection:', error?.message || error);
 });
 
 main();
