@@ -72,6 +72,24 @@ app = Bottle()
 task_runner = WorkbenchTaskRunner()
 job_mutation_lock = Lock()
 
+# ── 空闲自动退出（关掉网页即停服）─────────────────────────────
+# 任何 HTTP 请求都会刷新心跳；面板被浏览器访问过（_idle_armed）且
+# 超过 IDLE_TIMEOUT 秒无请求时，视为用户已关闭页面，自动停服退出。
+IDLE_TIMEOUT = 180  # 秒：连续 3 分钟无请求即退出（避免误杀，用户可调）
+_HAS_FRONTEND_ACCESS = False
+_LAST_ACTIVITY = time.monotonic()
+
+
+def _touch_activity() -> None:
+	global _HAS_FRONTEND_ACCESS, _LAST_ACTIVITY
+	_HAS_FRONTEND_ACCESS = True
+	_LAST_ACTIVITY = time.monotonic()
+
+
+if not hasattr(app, "_idle_shutdown_installed"):
+	app.add_hook("before_request", _touch_activity)
+	app._idle_shutdown_installed = True
+
 
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
 	"""Handle Chrome preconnect sockets without blocking other requests."""
@@ -2363,6 +2381,30 @@ def error500(error):
 
 # ─── Run ─────────────────────────────────────────────────
 
+def _stop_cdp_proxy() -> None:
+	"""Kill the CDP browser-runtime proxy (node process on proxy_port 3456)."""
+	try:
+		from jobwinner.config import load_config as _lc
+		cfg = _lc(CONFIG_PATH)
+		proxy_port = int(cfg.get("browser", {}).get("proxy_port", 3456))
+	except Exception:
+		proxy_port = 3456
+	try:
+		import socket
+		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		sock.settimeout(1)
+		if sock.connect_ex(("127.0.0.1", proxy_port)) == 0:
+			import subprocess
+			subprocess.run(
+				["powershell", "-NoProfile", "-Command",
+				 f"$c = Get-NetTCPConnection -LocalPort {proxy_port} -State Listen -ErrorAction SilentlyContinue; if ($c) {{ Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue }}"],
+				creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+			)
+		sock.close()
+	except Exception:
+		pass
+
+
 def run_server(host: str = "127.0.0.1", port: int = 8686, open_browser: bool = True):
 	"""Start the web server."""
 	if open_browser:
@@ -2385,6 +2427,23 @@ def run_server(host: str = "127.0.0.1", port: int = 8686, open_browser: bool = T
 			pass
 
 	_threading.Thread(target=_initial_portal_check, daemon=True).start()
+
+	# 空闲自动退出：关掉网页后，连续 IDLE_TIMEOUT 秒无请求 → 停服（含 CDP 代理）
+	def _idle_shutdown_watcher() -> None:
+		global _HAS_FRONTEND_ACCESS
+		while True:
+			try:
+				time.sleep(10)
+				if not _HAS_FRONTEND_ACCESS:
+					continue  # 从未被浏览器访问过，不自动退出
+				if time.monotonic() - _LAST_ACTIVITY > IDLE_TIMEOUT:
+					print("[jobwinner] 网页已关闭，空闲超过阈值，自动停止服务...")
+					_stop_cdp_proxy()
+					os._exit(0)
+			except Exception:
+				time.sleep(10)
+
+	_threading.Thread(target=_idle_shutdown_watcher, daemon=True).start()
 
 	app.run(
 		host=host,
