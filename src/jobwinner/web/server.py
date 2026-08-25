@@ -75,7 +75,7 @@ job_mutation_lock = Lock()
 # ── 空闲自动退出（关掉网页即停服）─────────────────────────────
 # 任何 HTTP 请求都会刷新心跳；面板被浏览器访问过（_idle_armed）且
 # 超过 IDLE_TIMEOUT 秒无请求时，视为用户已关闭页面，自动停服退出。
-IDLE_TIMEOUT = 180  # 秒：连续 3 分钟无请求即退出（避免误杀，用户可调）
+IDLE_TIMEOUT = int(os.environ.get("JOBWINNER_IDLE_TIMEOUT", "180"))  # 秒：连续 3 分钟无请求即退出（避免误杀，可环境变量覆盖）
 _HAS_FRONTEND_ACCESS = False
 _LAST_ACTIVITY = time.monotonic()
 
@@ -2428,16 +2428,25 @@ def run_server(host: str = "127.0.0.1", port: int = 8686, open_browser: bool = T
 
 	_threading.Thread(target=_initial_portal_check, daemon=True).start()
 
-	# 空闲自动退出：关掉网页后，连续 IDLE_TIMEOUT 秒无请求 → 停服（含 CDP 代理）
+	# 空闲自动退出：关掉网页后，连续 IDLE_TIMEOUT 秒无请求 → 停服（含 CDP 代理）。
+	# 保护：存在活跃任务（采集/评分/监测/发送）时永不自动退出，任务跑完才恢复空闲计时。
 	def _idle_shutdown_watcher() -> None:
-		global _HAS_FRONTEND_ACCESS
+		global _HAS_FRONTEND_ACCESS, _LAST_ACTIVITY
 		while True:
 			try:
 				time.sleep(10)
 				if not _HAS_FRONTEND_ACCESS:
 					continue  # 从未被浏览器访问过，不自动退出
+				try:
+					has_active = bool(task_runner.status().get("active_tasks"))
+				except Exception:
+					has_active = False
+				if has_active:
+					# 有任务在跑：视为持续心跳，任务跑完后再开始空闲计时
+					_LAST_ACTIVITY = time.monotonic()
+					continue
 				if time.monotonic() - _LAST_ACTIVITY > IDLE_TIMEOUT:
-					print("[jobwinner] 网页已关闭，空闲超过阈值，自动停止服务...")
+					print("[jobwinner] 网页已关闭且无活跃任务，空闲超过阈值，自动停止服务...")
 					_stop_cdp_proxy()
 					os._exit(0)
 			except Exception:
