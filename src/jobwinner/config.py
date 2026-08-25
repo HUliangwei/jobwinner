@@ -136,6 +136,10 @@ DEFAULTS: dict[str, Any] = {
         "enable_port_guard": True,
         "site_patterns": True,
     },
+    "channels": {
+        "active": "bosszp",
+        "bosszp": {"enabled": True},
+    },
 }
 
 

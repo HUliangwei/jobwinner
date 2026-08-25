@@ -19,25 +19,29 @@ from jobwinner.db import (
 )
 from jobwinner.throttle import RequestThrottle, SendWindowChecker
 from jobwinner.browser_lock import BrowserPriority, platform_browser_lock
+from jobwinner.channels import get_active_channel, set_active_channel, current_channel
 
 console = Console()
 
 PORTFOLIO_URL = None  # Set via config: profile.portfolio_url
 
 
-def _browser_locked(platform: str, priority: int):
+def _browser_locked(platform: str | None, priority: int):
     """装饰器：把函数的浏览器操作纳入指定平台/优先级锁。
 
     监测中的对话操作（打开对话、发自动回复、发简历）都驱动同一个 Chrome，
     必须与采集/发送共享平台锁。监测是低优先级，发送/采集持锁时它排队；
     它持锁时发送可插队。
+
+    ``platform`` 为 None 时使用当前活动渠道的锁名（支持多渠道）。
     """
     import functools
 
     def deco(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            with platform_browser_lock(platform).context(priority):
+            lock_key = platform if platform else current_channel().lock_key
+            with platform_browser_lock(lock_key).context(priority):
                 return fn(*args, **kwargs)
         return wrapper
     return deco
@@ -513,7 +517,7 @@ def _send_message_in_chat(target_id: str, message: str) -> bool:
         return False
 
 
-@_browser_locked("boss", BrowserPriority.MONITOR)
+@_browser_locked(None, BrowserPriority.MONITOR)
 def _open_conversation(job: dict, config: dict) -> str | None:
     """Open a conversation with HR. Returns target_id or None.
 
@@ -558,7 +562,7 @@ def _open_conversation(job: dict, config: dict) -> str | None:
                 if info and "chat" in (info.get("url") or ""):
                     return target_id
                 # Sometimes click navigates to chat
-                if info and "zhipin.com" in (info.get("url") or ""):
+                if info and get_active_channel(config).is_own_page(info.get("url") or ""):
                     return target_id
 
             close_tab(target_id)
@@ -576,7 +580,8 @@ def _open_conversation_from_chat_list(job: dict, config: dict) -> str | None:
     if stop_requested(config):
         return None
     monitor_cfg = config.get("monitor", {})
-    chat_url = monitor_cfg.get("chat_url", "https://www.zhipin.com/web/geek/chat")
+    channel = get_active_channel(config)
+    chat_url = monitor_cfg.get("chat_url") or channel.build_chat_url()
     target_id = new_tab(chat_url, background=True)
     if not target_id:
         return None
@@ -745,16 +750,18 @@ def _deliver_resume_to_chat(target_id: str) -> bool:
 
 
 def check_replies(config: dict) -> list[dict]:
-    """Open BOSS chat page and detect conversations with HR replies.
+    """Open the active channel's chat page and detect conversations with HR replies.
 
     Returns list of conversations with replies (including matched job info).
     """
+    set_active_channel(get_active_channel(config))
     db = get_db()
     if stop_requested(config):
         db.close()
         return []
     monitor_cfg = config.get("monitor", {})
-    chat_url = monitor_cfg.get("chat_url", "https://www.zhipin.com/web/geek/chat")
+    channel = current_channel()
+    chat_url = monitor_cfg.get("chat_url") or channel.build_chat_url()
 
     # Get jobs we've sent greetings to (or already replied/resume_sent/follow_up_sent/needs_resume - keep monitoring)
     sent_jobs = get_jobs_by_status(db, "sent")
@@ -773,7 +780,7 @@ def check_replies(config: dict) -> list[dict]:
 
     # Open chat page. 监测读聊天列表也操作浏览器，纳入平台锁（低优先级，
     # 发送/采集持锁时它排队；它持锁时发送可插队）。
-    with platform_browser_lock("boss").context(BrowserPriority.MONITOR):
+    with platform_browser_lock(channel.lock_key).context(BrowserPriority.MONITOR):
         target_id = new_tab(chat_url, background=True)
         if not target_id:
             console.print("[red]无法打开聊天页面[/red]")
@@ -883,7 +890,7 @@ def _match_conversation_to_job(conv: dict, jobs: list[dict]) -> dict | None:
     return None
 
 
-@_browser_locked("boss", BrowserPriority.MONITOR)
+@_browser_locked(None, BrowserPriority.MONITOR)
 def _handle_conversation(job: dict, config: dict) -> str:
     """Handle a single conversation that has an HR reply.
 

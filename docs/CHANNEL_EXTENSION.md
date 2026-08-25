@@ -137,12 +137,20 @@ channels:
 - CDP 卡顿修复（5s 超时 + 自动重连）— 已稳定
 - 浏览器平台锁（按平台字符串分锁）— 随时可接新渠道
 - site-pattern 机制（zhipin.com.md 为模板）— 新渠道照此编写
+- **渠道抽象层（阶段 A 已完成，见第 3 节）**：
+  - `channels/base.py` — `ChannelAdapter` 抽象基类（key/domain/base_url/lock_key、URL 构建、登录检测、风控策略、生命周期钩子）
+  - `channels/bosszp.py` — Boss直聘适配器（原 scraper 的 SEARCH_URL/JS 提取脚本迁入）
+  - `channels/__init__.py` — 注册表 + `get_active_channel`(按 config 选择) + `set_active_channel`/`current_channel`(进程级缓存，供深调用链取渠道)
+  - `scraper/jobs.py` — 采集链路改为按 adapter 构建 URL / 取选择器 / 取锁名（行为不变，全量测试通过）
+  - `executor/sender.py` / `monitor.py` — 锁名、chat_url 默认值、域名判断改为读取活动渠道（行为不变）
+  - `config.yaml` / `config.example.yaml` — 新增 `channels.active`（默认 `bosszp`，行为不变）
+  - `tests/test_channels.py` — 15 项渠道层测试
 
 ---
 
 ## 7. 交接状态
 
-- 代码基线：master @ 596d27a（全部已推送 origin/master）
+- 代码基线：master @ c6a3c12（含渠道抽象层阶段 A，全部已推送 origin/master）
 - 仓库公开：是（https://github.com/HUliangwei/jobwinner）
 - 隐私：config.yaml / data/ / *.db / 简历 全部 .gitignore，公开仓库无敏感数据
-- 下一步：按阶段 A 开始抽取 channels 抽象层（如需协助可分派）
+- 下一步：**阶段 B（配置化 + DB channel 列）**或**阶段 C（新增首个非 boss 渠道验证抽象）**，见第 3 节

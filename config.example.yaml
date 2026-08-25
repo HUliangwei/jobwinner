@@ -88,3 +88,13 @@ browser:
   auto_start_proxy: true
   enable_port_guard: true
   site_patterns: true
+
+# 渠道配置：active 为当前启用的投递渠道
+# 每个渠道一个适配器（src/jobwinner/channels/<key>.py），后续渠道在此追加
+channels:
+  active: "bosszp"          # 当前启用渠道
+  bosszp:
+    enabled: true           # Boss直聘（zhipin.com）
+  # 示例：新增渠道时在此追加（后续版本支持）
+  # liepin:
+  #   enabled: false

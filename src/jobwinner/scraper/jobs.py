@@ -1,4 +1,4 @@
-"""Job scraping module - Extract jobs from BOSS直聘 search results."""
+"""Job scraping module - Extract jobs from the active channel's search results."""
 
 import json
 import random
@@ -7,7 +7,6 @@ import time
 import hashlib
 from typing import Callable
 from jobwinner.browser_lock import BrowserPriority, platform_browser_lock
-from urllib.parse import quote
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -15,6 +14,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from jobwinner.browser import (
     new_tab, close_tab, evaluate, scroll, wait_for_load
 )
+from jobwinner.channels import get_active_channel
 from jobwinner.config import CITY_CODES
 from jobwinner.cancellation import get_stop_event
 from jobwinner.db import get_db, job_exists, insert_job
@@ -23,112 +23,12 @@ from jobwinner.throttle import PageThrottle
 
 console = Console()
 
-# BOSS直聘搜索页 URL 模板
-SEARCH_URL = "https://www.zhipin.com/web/geek/job?query={keyword}&city={city_code}"
-
 
 def _resolve_city_code(city: str, config: dict) -> str | None:
     custom_codes = config.get("search", {}).get("city_codes", {})
     if isinstance(custom_codes, dict) and custom_codes.get(city):
         return str(custom_codes[city])
     return CITY_CODES.get(city)
-
-
-# JS: 从搜索列表页提取岗位卡片数据
-JS_EXTRACT_LIST = """
-(() => {
-    const wraps = document.querySelectorAll('.job-card-wrap');
-    const jobs = [];
-    wraps.forEach((wrap) => {
-        const box = wrap.querySelector('.job-card-box') || wrap;
-        const nameEl = box.querySelector('.job-name');
-        const salaryEl = box.querySelector('.job-salary');
-        const tags = box.querySelectorAll('.tag-list li');
-        const companyEl = box.querySelector('.boss-name') || box.querySelector('.company-name');
-        const locationEl = box.querySelector('.company-location');
-        const href = nameEl ? nameEl.getAttribute('href') : '';
-
-        if (!nameEl || !href) return;
-
-        jobs.push({
-            title: nameEl.textContent.trim(),
-            salary: salaryEl ? salaryEl.textContent.trim() : '',
-            experience: tags[0] ? tags[0].textContent.trim() : '',
-            education: tags[1] ? tags[1].textContent.trim() : '',
-            company: companyEl ? companyEl.textContent.trim() : '',
-            location: locationEl ? locationEl.textContent.trim() : '',
-            url: href
-        });
-    });
-    return JSON.stringify(jobs);
-})()
-"""
-
-# JS: 从详情页提取完整岗位信息
-JS_EXTRACT_DETAIL = """
-(() => {
-    const info = {};
-    // Title and salary
-    info.title = document.querySelector('.info-primary .name h1')?.textContent?.trim()
-        || document.querySelector('.name h1')?.textContent?.trim()
-        || document.title.split('-')[0]?.trim();
-    info.salary = document.querySelector('.info-primary .salary')?.textContent?.trim()
-        || document.querySelector('.salary')?.textContent?.trim() || '';
-
-    // Tags (experience, education, etc)
-    const tagItems = document.querySelectorAll('.info-primary .tag-list span');
-    const tagTexts = Array.from(tagItems).map(t => t.textContent.trim());
-    info.experience = tagTexts[0] || '';
-    info.education = tagTexts[1] || '';
-
-    // JD
-    info.jd = document.querySelector('.job-sec-text')?.textContent?.trim() || '';
-
-    // Company info - try multiple selectors
-    const companyLinks = document.querySelectorAll('.sider-company .company-info a');
-    info.company = '';
-    for (const link of companyLinks) {
-        const text = link.textContent.trim();
-        if (text && text.length > 0 && !text.includes('http')) {
-            info.company = text;
-            break;
-        }
-    }
-    if (!info.company) {
-        // Fallback: extract from page title "「职位」_公司名招聘"
-        const titleMatch = document.title.match(/_(.+?)招聘/);
-        info.company = titleMatch ? titleMatch[1] : '';
-    }
-
-    // Company details
-    const companyTags = document.querySelectorAll('.sider-company .res-industry-item, .company-info-item');
-    info.company_size = '';
-    info.company_industry = '';
-    companyTags.forEach(tag => {
-        const text = tag.textContent.trim();
-        if (text.includes('人')) info.company_size = text;
-        else if (!info.company_industry) info.company_industry = text;
-    });
-
-    // HR info
-    const bossSection = document.querySelector('.boss-info-attr') || document.querySelector('.job-boss-info');
-    if (bossSection) {
-        const nameEl = bossSection.querySelector('.name');
-        const titleEl = bossSection.querySelector('.title');
-        info.hr_name = nameEl?.textContent?.trim() || '';
-        info.hr_title = titleEl?.textContent?.trim() || '';
-    } else {
-        info.hr_name = '';
-        info.hr_title = '';
-    }
-    info.hr_active = document.querySelector('.boss-active-time')?.textContent?.trim() || '';
-
-    // URL
-    info.url = window.location.pathname;
-
-    return JSON.stringify(info);
-})()
-"""
 
 
 def _generate_job_id(url: str) -> str:
@@ -155,7 +55,7 @@ def scrape_jobs(
     collected_job_ids: list[str] | None = None,
     on_new_job: Callable | None = None,
 ) -> int:
-    """Scrape jobs from BOSS直聘 and store in database.
+    """Scrape jobs from the active channel and store in database.
 
     Supports multi-keyword × multi-city combinations with pagination.
     When limit is None, collection is bounded only by city × keyword × max_pages.
@@ -166,6 +66,7 @@ def scrape_jobs(
     """
     db = get_db()
     stop_event = get_stop_event(config)
+    channel = get_active_channel(config)
     throttle = PageThrottle(delay_min=2.0, delay_max=5.0)
     deal_breakers = config.get("profile", {}).get("deal_breakers", [])
     jd_deal_breakers = config.get("profile", {}).get("jd_deal_breakers", [])
@@ -231,14 +132,11 @@ def scrape_jobs(
                     break
 
                 # Build paginated URL
-                search_url = SEARCH_URL.format(keyword=quote(keyword), city_code=city_code)
-                sort_mode = search_config.get("sort", "")
-                if sort_mode == "newest":
-                    search_url += "&sortType=2"
-                if page > 1:
-                    search_url += f"&page={page}"
+                search_url = channel.build_search_url(
+                    keyword, city_code, page=page, sort=search_config.get("sort", "")
+                )
 
-                with platform_browser_lock("boss").context(BrowserPriority.COLLECT):
+                with platform_browser_lock(channel.lock_key).context(BrowserPriority.COLLECT):
                     # Open the first search page in the current window foreground
                     # so the user can see collect starting in Chrome; subsequent
                     # pages open in the background to avoid stealing focus.
@@ -267,7 +165,7 @@ def scrape_jobs(
                         break
 
                     # Extract job list
-                    result = evaluate(target_id, JS_EXTRACT_LIST)
+                    result = evaluate(target_id, channel.js_extract_list)
                     if not result:
                         close_tab(target_id)
                         break
@@ -315,8 +213,8 @@ def scrape_jobs(
                     # 并发操作同一个 Chrome，破坏页面状态。锁粒度为单条详情。
                     if throttle.wait(stop_event):
                         break
-                    detail_url = f"https://www.zhipin.com{job_url}"
-                    with platform_browser_lock("boss").context(BrowserPriority.COLLECT):
+                    detail_url = channel.build_job_url(job_data)
+                    with platform_browser_lock(channel.lock_key).context(BrowserPriority.COLLECT):
                         detail_target = new_tab(detail_url, background=True)
                         if not detail_target:
                             continue
@@ -330,7 +228,7 @@ def scrape_jobs(
                             break
 
                         # Extract detail
-                        detail_result = evaluate(detail_target, JS_EXTRACT_DETAIL)
+                        detail_result = evaluate(detail_target, channel.js_extract_detail)
                         close_tab(detail_target)
 
                     if not detail_result:

@@ -20,6 +20,7 @@ from jobwinner.browser import (
 from jobwinner.db import get_db, get_jobs_ready_to_send, update_job_status, add_history, add_risk_event
 from jobwinner.throttle import RequestThrottle, SendWindowChecker, ProgressiveBackoff, should_take_day_off
 from jobwinner.browser_lock import BrowserPriority, platform_browser_lock
+from jobwinner.channels import get_active_channel, set_active_channel, current_channel
 
 console = Console()
 
@@ -343,11 +344,16 @@ def _submit_startchat_greeting(target_id: str, greeting: str) -> dict:
 
 
 def _navigate_to_chat_redirect(target_id: str, click_result: dict) -> bool:
-    """Reuse BOSS's own chat destination without foregrounding the job tab."""
+    """Reuse the platform's own chat destination without foregrounding the job tab."""
     redirect_url = str(click_result.get("redirectUrl") or "").strip()
+    channel = current_channel()
+    # Platform-specific: BOSS redirects via /web/geek/chat; other channels may
+    # use their own chat paths. Adapters that need stricter matching override
+    # ``is_chat_path`` if added later.
     if not redirect_url.startswith("/web/geek/chat"):
         return False
-    return navigate(target_id, urljoin("https://www.zhipin.com", redirect_url))
+    base = channel.base_url or f"https://{channel.domain}"
+    return navigate(target_id, urljoin(base, redirect_url))
 
 
 def _handle_greet_popup(target_id: str, greeting: str, click_result: dict | None = None) -> dict:
@@ -687,7 +693,7 @@ def _send_greeting_once(
     # Serialize browser-level operations across parallel workbench tasks.
     # 发送是最高优先级浏览器操作（写岗位页/发消息最敏感），
     # 平台锁会让它在采集/监测之前插队。
-    with platform_browser_lock("boss").context(BrowserPriority.DELIVER):
+    with platform_browser_lock(current_channel().lock_key).context(BrowserPriority.DELIVER):
         return _send_greeting_once_locked(job, greeting, throttle_config, phase_callback)
 
 
@@ -938,6 +944,7 @@ def _send_greeting_once_locked(
 
 def send_greetings(config: dict, force: bool = False) -> int:
     """Send generated greetings. Returns count of successfully sent."""
+    set_active_channel(get_active_channel(config))
     db = get_db()
     throttle_config = config.get("throttle", {})
     stop_event = config.get("_workbench_stop_event")
