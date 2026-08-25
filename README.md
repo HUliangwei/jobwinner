@@ -106,7 +106,36 @@ google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.jobwinner-chr
 
 在这个独立 Chrome 窗口中登录招聘网站并**保持窗口打开**（JobWinner 不保存账号密码，通过 CDP 直连你的登录态）。
 
-### 三、配置并检测
+### 三、Windows 一键启动与退出
+
+> 桌面图标 `JobWinner`（或 `scripts/启动JobWinner.cmd`）双击即用，**无终端黑窗**。
+
+**启动**：
+
+- 双击桌面 **JobWinner** 图标（Windows 专属快捷方式）
+- 脚本自动做三件事：
+  1. 检测 8686 → 未运行则**后台无窗口**启动 Web 面板（`jobwinner web`）
+  2. 检测 3456 → 未运行则**后台无窗口**启动浏览器运行时（`jobwinner connect`）
+  3. 自动打开浏览器 http://127.0.0.1:8686
+- 启动脚本本身 2 秒后自动退出，**不留黑窗**；后台服务由 VBS 以隐藏窗口方式常驻
+
+**退出（网页，推荐）**：
+
+- 在面板右上角点红色 **「退出服务」** 按钮 → 确认
+- 等效关闭终端：自动停止所有后台任务（采集/评分/监测/发送）→ 停掉浏览器运行时 (3456) → 退出 Web 服务 (8686)
+- 所有进程干净退出，无残留（无黑窗需关）
+
+**退出（命令行，等价的）**：
+
+```bash
+curl -X POST http://127.0.0.1:8686/api/shutdown
+```
+
+**空闲自动退出**：关闭网页且无活跃任务后，默认 **180 秒**无请求自动停服（可用环境变量 `JOBWINNER_IDLE_TIMEOUT` 调整），避免服务常驻占用资源。
+
+> 注：脚本依赖项目目录 `.venv`（conda 创建的 venv 无独立 exe），因此用 `python.exe -m jobwinner.main` 启动；请勿删除 `.venv`。
+
+### 四、配置并检测
 
 ```bash
 jobwinner web        # 打开 http://127.0.0.1:8686
@@ -116,7 +145,7 @@ jobwinner connect    # 检测 Chrome CDP 连接
 
 在配置面板完成：简历上传 → 搜索关键词/城市 → AI 服务商 → 发送频率。**API Key 只在本地面板填写。**
 
-### 四、运行
+### 五、运行
 
 ```bash
 jobwinner run        # 一键全流程
