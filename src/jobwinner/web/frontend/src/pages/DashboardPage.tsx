@@ -230,6 +230,7 @@ const METRIC_DEFS: Record<string, { key: string; label: string }> = {
   send_sent: { key: 'send_sent', label: '本轮已发送' },
   send_remaining: { key: 'send_remaining', label: '待发送' },
   send_failed: { key: 'send_failed', label: '本轮失败' },
+  send_deferred: { key: 'send_deferred', label: '因额度延后' },
   monitor_replied: { key: 'monitor_replied', label: 'HR新回复' },
   monitor_pending: { key: 'monitor_pending', label: '待回复' },
   monitor_rejected: { key: 'monitor_rejected', label: '已拒绝' },
@@ -238,12 +239,12 @@ const METRIC_DEFS: Record<string, { key: string; label: string }> = {
 
 // 每环节只显示与自身相关的指标，避免满屏无意义的 0（视觉优化）
 const MODE_METRIC_KEYS: Record<string, string[]> = {
-  full: ['collect_seen', 'collect_new', 'ai_passed', 'ai_filtered', 'send_sent', 'send_remaining', 'send_failed'],
+  full: ['collect_seen', 'collect_new', 'ai_passed', 'ai_filtered', 'send_sent', 'send_remaining', 'send_deferred', 'send_failed'],
   collect: ['collect_seen', 'collect_new', 'collect_duplicate'],
   score: ['ai_completed', 'ai_total', 'ai_passed', 'ai_filtered', 'ai_failed'],
   rescore: ['ai_completed', 'ai_total', 'ai_passed', 'ai_filtered', 'ai_failed'],
-  monitor: ['monitor_replied', 'monitor_pending', 'monitor_rejected', 'monitor_checks', 'send_sent', 'send_remaining', 'send_failed'],
-  deliver: ['send_sent', 'send_remaining', 'send_failed'],
+  monitor: ['monitor_replied', 'monitor_pending', 'monitor_rejected', 'monitor_checks', 'send_sent', 'send_remaining', 'send_deferred', 'send_failed'],
+  deliver: ['send_sent', 'send_remaining', 'send_deferred', 'send_failed'],
 }
 
 function visibleMetricItems(task: WorkbenchTask) {
@@ -492,6 +493,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         sent: Number(sendingTask.metrics.send_sent || 0),
         remaining: Number(sendingTask.metrics.send_remaining || 0),
         failed: Number(sendingTask.metrics.send_failed || 0),
+        deferred: Number(sendingTask.metrics.send_deferred || 0),
         total: Number(sendingTask.metrics.send_total || 0),
         phase: sendPhase || (Number(sendingTask.metrics.send_remaining || 0) > 0 ? 'sending' : 'done'),
       }
@@ -995,6 +997,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
               <div className="text-xs font-bold text-muted">
                 本轮已发送 <span className="text-primary">{sendProgress.sent}</span> / {sendProgress.total}
                 {sendProgress.remaining > 0 && <> · 待发送 <span className="text-primary">{sendProgress.remaining}</span></>}
+                {sendProgress.deferred > 0 && <> · 因额度延后 <span className="text-amber-600">{sendProgress.deferred}</span></>}
                 {sendProgress.failed > 0 && <> · 失败 <span className="text-danger">{sendProgress.failed}</span></>}
               </div>
             </div>

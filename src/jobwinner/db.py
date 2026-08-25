@@ -388,7 +388,7 @@ def get_jobs_ready_to_send(conn: sqlite3.Connection) -> list[dict]:
           AND deleted_at IS NULL
           AND greeting IS NOT NULL
           AND TRIM(greeting) != ''
-        ORDER BY score DESC
+        ORDER BY created_at ASC
     """).fetchall()
     return [dict(row) for row in rows]
 
