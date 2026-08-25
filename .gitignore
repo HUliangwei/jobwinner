@@ -8,6 +8,15 @@ dist/
 build/
 *.egg
 
+# Pytest / test residue
+.pytest_cache/
+pytest-cache-files*/
+tmpd*/
+tmpdv*/
+coverage.xml
+htmlcov/
+.cache/
+
 # Virtual environments
 .venv/
 venv/
