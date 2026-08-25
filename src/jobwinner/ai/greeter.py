@@ -448,8 +448,18 @@ def generate_greetings(config: dict, *, include_ready: bool = False) -> int:
         else get_jobs_by_status(db, "approved")
     )
     _workbench_job_ids = {str(job_id) for job_id in config.get("_workbench_job_ids", [])}
+    # 投递场景（_workbench_job_ids 指定了具体岗位）：已有招呼语的岗位视为
+    # 已满足，无需重新生成——避免“发送失败重试”时误报生成失败（exit code 非0）。
+    already_ready_ids: set[str] = set()
     if _workbench_job_ids:
         jobs = [job for job in jobs if str(job["id"]) in _workbench_job_ids]
+        if include_ready:
+            for row in db.execute(
+                "SELECT id FROM jobs WHERE id IN (%s) AND greeting IS NOT NULL AND TRIM(greeting) != ''"
+                % ",".join("?" for _ in _workbench_job_ids),
+                list(_workbench_job_ids),
+            ).fetchall():
+                already_ready_ids.add(str(row["id"]))
 
     if not jobs:
         hint = "没有已确认的岗位可生成招呼语。请先运行 jobwinner confirm，或使用 jobwinner run 执行完整流程。"
@@ -457,7 +467,8 @@ def generate_greetings(config: dict, *, include_ready: bool = False) -> int:
             hint = "没有待生成招呼语的岗位（评分通过即自动生成）。"
         console.print(f"[yellow]{hint}[/yellow]")
         db.close()
-        return 0
+        # 选中的岗位全部已有招呼语 → 视为全部满足（避免误报投递失败）
+        return len(already_ready_ids)
 
     resume_summary = _get_resume_summary(config)
     if not resume_summary:
@@ -555,6 +566,9 @@ def generate_greetings(config: dict, *, include_ready: bool = False) -> int:
             if pause_after_current:
                 pause_reason = pause_after_current
                 break
+
+    # 投递场景：选中但已有招呼语的岗位（未被 jobs 选中生成）计入成功数
+    count += len(already_ready_ids)
 
     db.close()
     if pause_reason:
