@@ -116,7 +116,12 @@ class WorkbenchTaskRunner:
                 task.deadline_at = deadline.isoformat(timespec="seconds")
             self._tasks[task.id] = task
 
-            if deadline and deadline <= datetime.now():
+            force_deliver = bool(
+                mode == "deliver"
+                and isinstance(config, dict)
+                and config.get("_workbench_skip_greeting")
+            )
+            if deadline and deadline <= datetime.now() and not force_deliver:
                 task.stop_requested.set()
                 task.status = "stopped"
                 task.stop_reason = "今日发送时间窗口已截止，后台未启动"
@@ -126,7 +131,7 @@ class WorkbenchTaskRunner:
 
             thread = Thread(target=self._run, args=(task, config), daemon=True)
             self._threads[task.id] = thread
-            if deadline:
+            if deadline and not force_deliver:
                 delay_seconds = max((deadline - datetime.now()).total_seconds(), 0)
                 timer = Timer(delay_seconds, self._stop_at_deadline, args=(task.id,))
                 timer.daemon = True
