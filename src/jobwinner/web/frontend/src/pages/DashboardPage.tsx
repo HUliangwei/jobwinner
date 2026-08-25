@@ -471,7 +471,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
   const resumePendingJobs = [...(workbench.resume_pending ?? []), ...(workbench.needs_resume ?? [])]
   const resumeItems = resumePendingJobs.filter((job, index, arr) => arr.findIndex(candidate => candidate.id === job.id) === index)
   const totalConfirmCount = todayJobs.length + pendingGreetingJobs.length
-  const pendingScoreCount = Math.max(0, (workbench.funnel['采集总数'] || 0) - (workbench.funnel['初筛通过'] || 0) - (workbench.funnel['AI评分'] || 0))
+  const pendingScoreCount = Number(workbench.pending_scoring_count ?? 0)
   const activeTask = workbench.task
   const visibleTask = activeTask || workbench.last_task
   const activeTasks = workbench.active_tasks?.length ? workbench.active_tasks : (activeTask ? [activeTask] : [])
@@ -963,7 +963,7 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
         {/* 评分说明：FIFO 消费规则（整合自原评分区说明） */}
         <div className="mt-4 flex items-start gap-2 rounded-2xl border border-card-border bg-[#FFFCFA] p-3 text-xs leading-6 text-muted">
           <Star className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-          <span>AI 按岗位库 FIFO 依次评分子，通过者自动生成招呼语并进入“确认投递”。当前待评分池 = 采集总数 − 初筛通过 − AI评分（{workbench.funnel['采集总数'] || 0} − {workbench.funnel['初筛通过'] || 0} − {workbench.funnel['AI评分'] || 0}）。</span>
+          <span>AI 按岗位库 FIFO 依次评分子，通过者自动生成招呼语并进入“确认投递”。当前真实待评分池 <b>{pendingScoreCount}</b> 个（采集任务即采即评，池通常为空；有未评岗位时会在此显示）。</span>
         </div>
         {/* 发送窗口提示 */}
         {workbench.send_window && (

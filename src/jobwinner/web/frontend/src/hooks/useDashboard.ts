@@ -63,6 +63,7 @@ interface WorkbenchData {
   pending_confirmation: Job[]
   pending_greetings: Job[]
   send_errors: Job[]
+  pending_scoring_count?: number
   needs_resume: Job[]
   resume_pending: Job[]
   task: WorkbenchTask | null

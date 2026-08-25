@@ -1324,6 +1324,7 @@ def api_workbench():
 			],
 			"pending_greetings": _merge_pending_greetings(db),
 			"send_errors": get_jobs_with_send_errors(db),
+			"pending_scoring_count": len(select_scoring_jobs(db, scope="pending", limit=None)),
 			"send_window": _send_window_info(load_config(CONFIG_PATH)),
 			"needs_resume": get_jobs_needing_resume(db),
 			"resume_pending": get_jobs_resume_pending(db),
