@@ -42,12 +42,17 @@ def get_page_targets() -> list[dict]:
     return _client().targets()
 
 
-def find_boss_tab() -> dict | None:
-    """Find a BOSS直聘 tab in Chrome."""
+def find_tab(domain: str) -> dict | None:
+    """Find a Chrome tab whose URL contains ``domain`` (e.g. "zhaopin.com")."""
     for target in get_page_targets():
-        if "zhipin.com" in target.get("url", ""):
+        if domain and domain in target.get("url", ""):
             return target
     return None
+
+
+def find_boss_tab() -> dict | None:
+    """Find a BOSS直聘 tab in Chrome (kept for back-compat / diagnostics)."""
+    return find_tab("zhipin.com")
 
 
 def new_tab(url: str, background: bool = False) -> str | None:

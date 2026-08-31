@@ -139,6 +139,7 @@ DEFAULTS: dict[str, Any] = {
     "channels": {
         "active": "bosszp",
         "bosszp": {"enabled": True},
+        "zhaopin": {"enabled": True},
     },
 }
 

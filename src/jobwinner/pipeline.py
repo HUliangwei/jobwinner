@@ -2,7 +2,7 @@
 
 from rich.console import Console
 
-from jobwinner.browser import check_chrome_connection, configure, find_boss_tab
+from jobwinner.browser import check_chrome_connection, configure, find_tab
 
 console = Console()
 
@@ -18,9 +18,12 @@ def run_pipeline(config: dict) -> None:
         console.print("[red]✗ Browser Runtime 未连接，请先运行 jobwinner connect 查看诊断[/red]")
         return
 
-    boss_tab = find_boss_tab()
-    if not boss_tab:
-        console.print("[red]✗ 未发现 BOSS直聘 页面，请先登录[/red]")
+    from jobwinner.channels import get_active_channel
+
+    channel = get_active_channel(config)
+    tab = find_tab(channel.domain)
+    if not tab:
+        console.print(f"[red]✗ 未发现 {channel.label} 页面，请先在 Chrome 中打开并登录[/red]")
         return
     console.print("[green]  ✓ 浏览器就绪[/green]\n")
 

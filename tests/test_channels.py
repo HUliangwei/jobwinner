@@ -97,6 +97,97 @@ class TestBosszpAdapter(unittest.TestCase):
     def test_throttle_policy_default_empty(self):
         self.assertEqual(self.ch.throttle_policy(), {})
 
+    def test_default_pagination_and_detail_caps(self):
+        # Boss 保持原有行为：最多 10 页、每岗位开详情页。
+        self.assertEqual(self.ch.pages_cap, 10)
+        self.assertTrue(self.ch.detail_required)
+
+
+
+
+class TestZhaopinAdapter(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from jobwinner.channels import get_channel
+
+        cls.ch = get_channel("zhaopin")
+
+    def test_registered_and_identity(self):
+        from jobwinner.channels import available_channels
+
+        self.assertIn("zhaopin", available_channels())
+        self.assertEqual(self.ch.key, "zhaopin")
+        self.assertEqual(self.ch.label, "智联招聘")
+        self.assertEqual(self.ch.domain, "zhaopin.com")
+        self.assertEqual(self.ch.lock_key, "zhaopin")
+
+    def test_search_url(self):
+        url = self.ch.build_search_url("Java", "530")
+        self.assertTrue(url.startswith("https://www.zhaopin.com/jobs?"))
+        self.assertIn("jl=530", url)
+        self.assertIn("kw=Java", url)
+
+    def test_build_job_url_passthrough(self):
+        url = "https://www.zhaopin.com/jobdetail/CC123J456.htm"
+        self.assertEqual(self.ch.build_job_url({"url": url}), url)
+
+    def test_city_codes(self):
+        self.assertEqual(self.ch.resolve_city_code("北京"), "530")
+        self.assertEqual(self.ch.resolve_city_code("上海"), "538")
+        self.assertEqual(self.ch.resolve_city_code("合肥"), "517")
+        self.assertIsNone(self.ch.resolve_city_code("火星"))
+
+    def test_city_code_beats_stale_custom_codes(self):
+        # Legacy global city_codes were written for BOSS直聘 (e.g. 101010100).
+        # The channel map must win so switching channels never misresolves.
+        self.assertEqual(self.ch.resolve_city_code("北京", {"北京": "101010100"}), "530")
+
+    def test_generate_job_id_from_jobdetail_url(self):
+        self.assertEqual(
+            self.ch.generate_job_id("https://www.zhaopin.com/jobdetail/CC315847110J40875174507.htm"),
+            "CC315847110J40875174507",
+        )
+        # Unknown layout falls back to md5 (32-char hex).
+        fid = self.ch.generate_job_id("https://www.zhaopin.com/weird/x")
+        self.assertEqual(len(fid), 16)
+
+    def test_supports_send_false_collect_only(self):
+        # 智联发送/监测未接入，渠道声明为采集-only，发送路径应优雅跳过。
+        self.assertFalse(self.ch.supports_send)
+
+    def test_pagination_and_detail_caps(self):
+        # 新版 SPA 忽略 ?page=N → 只取首页；列表页 state 已含完整详情 → 不开详情页。
+        self.assertEqual(self.ch.pages_cap, 1)
+        self.assertFalse(self.ch.detail_required)
+
+    def test_js_extract_list_reads_initial_state(self):
+        # 新版智联搜索页把岗位列表放在内联 __INITIAL_STATE__（SSR 状态），
+        # 直读 positionList 即可拿到含真实薪资/完整 URL 的行数据（无需点击）。
+        result = self.ch.js_extract_list
+        self.assertIn("positionList", result)
+        self.assertIn("positionUrl", result)
+        self.assertIn("cardCustomJson", result)
+        self.assertIn("JSON.stringify(jobs)", result)
+        self.assertTrue(result.strip().startswith("(() =>"))
+
+    def test_js_extract_detail_has_fields(self):
+        result = self.ch.js_extract_detail
+        for field in ("describtion-card__detail-content", "company-info__desc", "hr_name"):
+            self.assertIn(field, result)
+
+    def test_is_own_page(self):
+        self.assertTrue(self.ch.is_own_page("https://www.zhaopin.com/jobs?jl=530"))
+        self.assertTrue(self.ch.is_own_page("https://passport.zhaopin.com/login"))
+        self.assertFalse(self.ch.is_own_page("https://www.zhipin.com/job/x"))
+
+
+class TestZhaopinActiveChannel(unittest.TestCase):
+    def test_get_active_channel_switches(self):
+        from jobwinner.channels import get_active_channel
+
+        ch = get_active_channel({"channels": {"active": "zhaopin"}})
+        self.assertEqual(ch.key, "zhaopin")
+
 
 class TestChannelAdapterBase(unittest.TestCase):
     def test_base_instantiation_guard(self):

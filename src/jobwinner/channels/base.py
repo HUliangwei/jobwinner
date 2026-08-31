@@ -48,6 +48,27 @@ class ChannelAdapter(abc.ABC):
     #: Default monitor chat URL (may be overridden by config ``monitor.chat_url``).
     default_chat_url: str = ""
 
+    #: Optional channel-specific city code map (name -> platform code).
+    #: Consulted before ``config.search.city_codes`` so switching channels never
+    #: reuses another channel's stale city codes from the global config.
+    city_codes: dict[str, str] = {}
+
+    #: Whether this channel can actually deliver greetings today. Channels that
+    #: are collect-only (search/scrape/score work, sending not yet wired) set
+    #: this to False so the sender skips them instead of clicking blind.
+    supports_send: bool = True
+
+    #: Hard cap on how many search-result pages the scraper will open for this
+    #: channel (raised against config ``search.max_pages``). Platforms whose new
+    #: SPA ignores ``?page=N`` set this to 1 to avoid burning tabs on no-op page
+    #: opens (job ids are still deduped, so extra pages are merely wasteful).
+    pages_cap: int = 10
+
+    #: Whether scoring needs a separate detail-page fetch. Channels whose list
+    #: page payload already carries full details (JD / real salary / company)
+    #: set this to False so collection skips opening one detail tab per job.
+    detail_required: bool = True
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         self.config = config or {}
 
@@ -87,6 +108,34 @@ class ChannelAdapter(abc.ABC):
         if isinstance(monitor_cfg, dict) and monitor_cfg.get("chat_url"):
             return str(monitor_cfg["chat_url"])
         return self.default_chat_url
+
+    def resolve_city_code(self, city: str, custom_codes: dict[str, str] | None = None) -> str | None:
+        """Resolve a city name to this channel's platform code.
+
+        Channel-specific :attr:`city_codes` win over ``custom_codes`` (the
+        legacy global ``search.city_codes`` from BOSS直聘) so switching the
+        active channel never breaks city resolution with stale codes.
+        """
+        if self.city_codes and self.city_codes.get(city):
+            return str(self.city_codes[city])
+        if custom_codes and isinstance(custom_codes, dict) and custom_codes.get(city):
+            return str(custom_codes[city])
+        return None
+
+    def generate_job_id(self, url: str) -> str:
+        """Generate a stable, unique id for a job URL.
+
+        Default extracts the BOSS直聘 position id from ``/job_detail/xxx.html``
+        URLs and falls back to an md5 of the URL; channels with other URL
+        layouts override the path pattern.
+        """
+        import hashlib
+        import re as _re
+
+        match = _re.search(r'/job_detail/([^.]+)', url or "")
+        if match:
+            return match.group(1)
+        return hashlib.md5((url or "").encode()).hexdigest()[:16]
 
     # ------------------------------------------------------------------
     # Login / diagnostics

@@ -92,9 +92,11 @@ browser:
 # 渠道配置：active 为当前启用的投递渠道
 # 每个渠道一个适配器（src/jobwinner/channels/<key>.py），后续渠道在此追加
 channels:
-  active: "bosszp"          # 当前启用渠道
+  active: "bosszp"          # 当前启用渠道（切换为 zhaopin 即走智联采集）
   bosszp:
     enabled: true           # Boss直聘（zhipin.com）
-  # 示例：新增渠道时在此追加（后续版本支持）
+  zhaopin:
+    enabled: true           # 智联招聘（zhaopin.com）：采集/评分已支持，发送待接入
+  # 示例：后续新增渠道时在此追加
   # liepin:
   #   enabled: false

@@ -2,9 +2,7 @@
 
 import json
 import random
-import re
 import time
-import hashlib
 from typing import Callable
 from jobwinner.browser_lock import BrowserPriority, platform_browser_lock
 
@@ -24,20 +22,19 @@ from jobwinner.throttle import PageThrottle
 console = Console()
 
 
-def _resolve_city_code(city: str, config: dict) -> str | None:
+def _resolve_city_code(city: str, config: dict, channel) -> str | None:
+    """Resolve a city name to a platform code.
+
+    Order: active channel's own city code map ``city_codes`` -> config ``search.city_codes``
+    (legacy BOSS直聘 codes) -> the global legacy ``CITY_CODES`` table.
+    Channel codes win so switching the active channel never lets stale BOSS
+    codes silently map to wrong cities on other platforms.
+    """
     custom_codes = config.get("search", {}).get("city_codes", {})
-    if isinstance(custom_codes, dict) and custom_codes.get(city):
-        return str(custom_codes[city])
+    code = channel.resolve_city_code(city, custom_codes=custom_codes)
+    if code:
+        return code
     return CITY_CODES.get(city)
-
-
-def _generate_job_id(url: str) -> str:
-    """Generate a unique job ID from URL path."""
-    # Extract the unique part from /job_detail/xxx.html
-    match = re.search(r'/job_detail/([^.]+)', url)
-    if match:
-        return match.group(1)
-    return hashlib.md5(url.encode()).hexdigest()[:16]
 
 
 def _wait_or_stop(stop_event, seconds: float) -> bool:
@@ -82,7 +79,7 @@ def scrape_jobs(
 
     # Pagination config
     search_config = config.get("search", {})
-    max_pages = min(search_config.get("max_pages", 3), 10)  # Hard cap: 10 pages
+    max_pages = min(search_config.get("max_pages", 3), channel.pages_cap or 10)  # 渠道上限
 
     # Resolve cities: search.cities > profile.target_cities > ["北京"]
     cities = search_config.get("cities", [])
@@ -92,7 +89,7 @@ def scrape_jobs(
     # Build search combinations: city × keyword
     search_combos = []
     for city in cities:
-        city_code = _resolve_city_code(city, config)
+        city_code = _resolve_city_code(city, config, channel)
         if not city_code:
             console.print(f"[yellow]⚠ 未识别的城市: {city}，已跳过[/yellow]")
             continue
@@ -194,7 +191,7 @@ def scrape_jobs(
                     seen_count += 1
                     report_progress()
                     job_url = job_data.get("url", "")
-                    job_id = _generate_job_id(job_url)
+                    job_id = channel.generate_job_id(job_url)
 
                     # Skip if already exists
                     if job_exists(db, job_id):
@@ -211,33 +208,41 @@ def scrape_jobs(
                     # Open detail page for full JD. 详情页的浏览器操作（开 tab →
                     # 等待加载 → 提取 → 关闭）也要走平台锁，否则它会和发送/监测
                     # 并发操作同一个 Chrome，破坏页面状态。锁粒度为单条详情。
-                    if throttle.wait(stop_event):
-                        break
                     detail_url = channel.build_job_url(job_data)
-                    with platform_browser_lock(channel.lock_key).context(BrowserPriority.COLLECT):
-                        detail_target = new_tab(detail_url, background=True)
-                        if not detail_target:
+                    detail: dict = {}
+                    if channel.detail_required:
+                        # 打开详情页抽取完整信息（默认行为，如 BOSS）。
+                        # 详情页操作也在平台锁内，避免与发送/监测并发破坏页面状态。
+                        if throttle.wait(stop_event):
+                            break
+                        with platform_browser_lock(channel.lock_key).context(BrowserPriority.COLLECT):
+                            detail_target = new_tab(detail_url, background=True)
+                            if not detail_target:
+                                continue
+
+                            if _wait_or_stop(stop_event, 2):
+                                close_tab(detail_target)
+                                break
+                            wait_for_load(detail_target, timeout=10)
+                            if stop_event is not None and stop_event.is_set():
+                                close_tab(detail_target)
+                                break
+
+                            # Extract detail
+                            detail_result = evaluate(detail_target, channel.js_extract_detail)
+                            close_tab(detail_target)
+
+                        if not detail_result:
                             continue
 
-                        if _wait_or_stop(stop_event, 2):
-                            close_tab(detail_target)
-                            break
-                        wait_for_load(detail_target, timeout=10)
-                        if stop_event is not None and stop_event.is_set():
-                            close_tab(detail_target)
-                            break
-
-                        # Extract detail
-                        detail_result = evaluate(detail_target, channel.js_extract_detail)
-                        close_tab(detail_target)
-
-                    if not detail_result:
-                        continue
-
-                    try:
-                        detail = json.loads(detail_result)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
+                        try:
+                            detail = json.loads(detail_result)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                    else:
+                        # 渠道列表页已携带完整详情（智联 __INITIAL_STATE__），
+                        # 直接使用列表数据，不再逐条开详情页。
+                        detail = dict(job_data)
 
                     # Build job record
                     job_record = {

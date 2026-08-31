@@ -85,10 +85,10 @@ def current_channel() -> ChannelAdapter:
 
 def _ensure_registry_loaded() -> None:
     """Import built-in channel modules so they self-register."""
-    if "bosszp" not in _REGISTRY:
-        from jobwinner.channels import bosszp  # noqa: F401  (side-effect import)
+    if "bosszp" not in _REGISTRY or "zhaopin" not in _REGISTRY:
+        from jobwinner.channels import bosszp, zhaopin  # noqa: F401  (side-effect imports)
 
-        assert bosszp  # keep linters quiet about the unused import
+        assert bosszp and zhaopin  # keep linters quiet about the unused imports
 
 
 __all__ = [

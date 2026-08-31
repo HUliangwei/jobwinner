@@ -24,8 +24,36 @@ def matching_blocked_company(company: str, blocked_companies: list[str]) -> str 
 
 
 def parse_monthly_salary_k(salary: str) -> tuple[float, float] | None:
-    """Parse common monthly K salary labels into a comparable range."""
+    """Parse common monthly salary labels into a comparable K-range.
+
+    Supports both ``25-50K`` (BOSS直聘) and ``2.5-3.5万`` (智联招聘,
+    converted: 万/月 x10 -> K/月, i.e. 2.5万 = 25K).
+    """
     normalized = str(salary or "").strip()
+
+    # 元/月 ranges (智联部分岗位直接给元，如 "6000-12000元") -> K = /1000。
+    # 日薪/时薪("150-200元/天") 由 (?!\s*/) 排除；低于 1000 元视为日薪级别不解析。
+    yuan_range = re.search(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*元(?!\s*/)", normalized)
+    if yuan_range:
+        low, high = (float(value) / 1000 for value in yuan_range.groups())
+        if low >= 1 and high >= 1:
+            return (min(low, high), max(low, high))
+
+    # 万/月 first: otherwise the plain K-range regex would read "2.5-3.5万"
+    # as a 2.5-3.5K range and silently undercut the salary filter.
+    wan_range = re.search(
+        r"(\d+(?:\.\d+)?)\s*[wW万]?\s*-\s*(\d+(?:\.\d+)?)\s*[wW万]",
+        normalized,
+    )
+    if wan_range:
+        low, high = (float(value) * 10 for value in wan_range.groups())
+        return (min(low, high), max(low, high))
+
+    wan_single = re.search(r"(\d+(?:\.\d+)?)\s*[wW万](?!\w)", normalized)
+    if wan_single:
+        value = float(wan_single.group(1)) * 10
+        return value, value
+
     range_match = re.search(
         r"(\d+(?:\.\d+)?)\s*[kK]?\s*-\s*(\d+(?:\.\d+)?)\s*[kK]",
         normalized,

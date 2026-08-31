@@ -19,17 +19,20 @@ class BrowserDiagnosticsTests(unittest.TestCase):
         self.assertEqual(product, "Edg/138.0")
         self.assertEqual(name, "Microsoft Edge")
 
+    @patch("jobwinner.browser.diagnostics.find_tab")
     @patch("jobwinner.browser.diagnostics.find_boss_tab")
     @patch("jobwinner.browser.diagnostics.runtime_targets")
     @patch("jobwinner.browser.diagnostics.ensure_runtime")
     @patch("jobwinner.browser.diagnostics.check_node_available")
-    def test_run_browser_diagnostics_reports_ready_runtime(self, check_node, ensure_runtime, runtime_targets, find_boss_tab):
+    def test_run_browser_diagnostics_reports_ready_runtime(self, check_node, ensure_runtime, runtime_targets, find_boss_tab, find_tab):
         from jobwinner.browser.diagnostics import run_browser_diagnostics
 
         check_node.return_value = {"available": True, "version": "v22.1.0"}
         ensure_runtime.return_value = True
         runtime_targets.return_value = [{"targetId": "1", "url": "https://www.zhipin.com"}]
         find_boss_tab.return_value = {"targetId": "1", "title": "BOSS直聘"}
+        # 新逻辑按渠道 domain 找 tab：两个渠道都返回同一个模拟 tab。
+        find_tab.return_value = {"targetId": "1", "title": "BOSS直聘"}
 
         result = run_browser_diagnostics({"browser": {"proxy_port": 3456}})
 
@@ -37,6 +40,7 @@ class BrowserDiagnosticsTests(unittest.TestCase):
         self.assertTrue(result["runtime"])
         self.assertTrue(result["chrome"])
         self.assertEqual(result["boss_tab"]["title"], "BOSS直聘")
+        self.assertEqual(result["channel_tabs"]["bosszp"]["title"], "BOSS直聘")
         self.assertEqual(result["runtime_url"], "http://127.0.0.1:3456")
 
     @patch("jobwinner.browser.diagnostics.find_boss_tab")

@@ -1382,6 +1382,13 @@ PLATFORM_PRESETS = [
 		"url": "https://www.zhipin.com/",
 		"login_markers": ("/login", "/signin", "/user/", "passport", "user/login"),
 	},
+	{
+		"key": "zhaopin",
+		"name": "智联招聘",
+		"url": "https://www.zhaopin.com/",
+		# 智联鉴权在 passport.zhaopin.com；个人中心 /user/ 等。
+		"login_markers": ("/login", "/signin", "/user/", "passport", "account", "user/login"),
+	},
 ]
 
 
@@ -1393,9 +1400,10 @@ def api_platforms_login():
 		config = load_config(CONFIG_PATH)
 		diag = run_browser_diagnostics(config)
 		boss_tab = diag.get("boss_tab")
+		channel_tabs = diag.get("channel_tabs") or {}
 		platforms = []
 		for preset in PLATFORM_PRESETS:
-			tab = boss_tab if preset["key"] == "boss" else None
+			tab = channel_tabs.get(preset["key"]) or (boss_tab if preset["key"] == "boss" else None)
 			url = str((tab or {}).get("url") or "")
 			lower_url = url.lower()
 			logged_in = bool(tab) and not any(

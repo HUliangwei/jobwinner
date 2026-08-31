@@ -1478,7 +1478,8 @@ class WebApiRouteTests(unittest.TestCase):
             self.assertTrue(status.startswith("200"), body)
             self.assertEqual(payload["filename"], "张三的中文简历.md")
             self.assertEqual(stored_path.read_bytes(), content)
-            self.assertEqual(config["profile"]["resume_path"], str(stored_path))
+            # 迁移后 config 里保存的是 BASE_DIR 相对路径（可移植），不再写绝对路径。
+            self.assertEqual(config["profile"]["resume_path"], server._config_rel_path(stored_path))
 
     def test_web_api_resume_upload_converts_docx_to_markdown(self):
         # Arrange
@@ -1885,11 +1886,15 @@ class WebApiRouteTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["chrome"])
         self.assertEqual(payload["browser_name"], "Google Chrome")
-        self.assertEqual(len(payload["platforms"]), 1)
+        self.assertEqual(len(payload["platforms"]), 2)
         boss = payload["platforms"][0]
         self.assertEqual(boss["key"], "boss")
         self.assertTrue(boss["opened"])
         self.assertTrue(boss["logged_in"])
+        # 智联招聘 preset：该 diag 未携带 channel_tabs → 未打开。
+        zhaopin = payload["platforms"][1]
+        self.assertEqual(zhaopin["key"], "zhaopin")
+        self.assertFalse(zhaopin["opened"])
 
     def test_platform_login_flags_login_page_as_not_logged_in(self):
         diag = {

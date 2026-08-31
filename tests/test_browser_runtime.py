@@ -138,14 +138,17 @@ class BrowserRuntimeManagerTests(unittest.TestCase):
             trust_env=False,
         )
 
+    @patch("jobwinner.browser.runtime.runtime_health")
     @patch("jobwinner.browser.runtime.runtime_targets")
     @patch("jobwinner.browser.runtime.start_runtime")
     @patch("jobwinner.browser.runtime.check_node_available")
-    def test_ensure_runtime_starts_builtin_runtime_when_auto_start_enabled(self, check_node, start_runtime, runtime_targets):
+    def test_ensure_runtime_starts_builtin_runtime_when_auto_start_enabled(self, check_node, start_runtime, runtime_targets, runtime_health):
         from jobwinner.browser.runtime import ensure_runtime
 
         check_node.return_value = {"available": True, "version": "v22.1.0"}
         runtime_targets.side_effect = [None, [{"targetId": "abc"}]]
+        # 默认端口上没有 jobwinner runtime（否则它已健康，无需再 start）。
+        runtime_health.return_value = None
 
         result = ensure_runtime({"browser": {"runtime": "builtin", "auto_start_proxy": True}}, wait_seconds=0.01)
 

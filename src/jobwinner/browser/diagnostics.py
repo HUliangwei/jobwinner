@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from rich.console import Console
 
-from jobwinner.browser import find_boss_tab
+from jobwinner.browser import find_boss_tab, find_tab
 from jobwinner.browser.runtime import check_node_available, ensure_runtime, get_runtime_url, runtime_health, runtime_targets
 
 
@@ -22,7 +22,15 @@ def run_browser_diagnostics(config: dict[str, Any] | None = None) -> dict[str, A
         # `/targets` establishes the CDP connection. Refresh health afterwards
         # so browser product/version information is available to diagnostics.
         health = runtime_health(config) or health
-    boss_tab = find_boss_tab() if runtime_ready else None
+    # Per-channel tab detection for every registered platform.
+    from jobwinner.channels import available_channels, get_channel
+
+    channel_tabs: dict[str, Any] = {}
+    if runtime_ready:
+        for key in available_channels():
+            ch = get_channel(key)
+            channel_tabs[key] = find_tab(ch.domain)
+    boss_tab = channel_tabs.get("bosszp") or (find_boss_tab() if runtime_ready else None)
     browser_product, browser_name = _browser_identity(health)
 
     errors: list[str] = []
@@ -42,6 +50,7 @@ def run_browser_diagnostics(config: dict[str, Any] | None = None) -> dict[str, A
         "chrome": isinstance(targets, list),
         "targets": targets or [],
         "boss_tab": boss_tab,
+        "channel_tabs": channel_tabs,
         "errors": errors,
         "runtime_url": runtime_url,
         "health": health,
