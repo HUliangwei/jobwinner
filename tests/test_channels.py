@@ -183,9 +183,9 @@ class TestZhaopinAdapter(unittest.TestCase):
         fid = self.ch.generate_job_id("https://www.zhaopin.com/weird/x")
         self.assertEqual(len(fid), 16)
 
-    def test_supports_send_false_collect_only(self):
-        # 智联发送/监测未接入，渠道声明为采集-only，发送路径应优雅跳过。
-        self.assertFalse(self.ch.supports_send)
+    def test_supports_send_true_deliver_flow(self):
+        # 智联投递+招呼语发送已接入（executor/sender.py 专属链路）。
+        self.assertTrue(self.ch.supports_send)
 
     def test_pagination_and_detail_caps(self):
         # 新版 SPA 忽略 ?page=N → 只取首页；列表页 state 已含完整详情 → 不开详情页。

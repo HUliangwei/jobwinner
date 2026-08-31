@@ -16,6 +16,7 @@ from jobwinner.browser import (
     navigate,
     press_key,
     type_text,
+    wait_for_load,
 )
 from jobwinner.db import get_db, get_jobs_ready_to_send, update_job_status, add_history, add_risk_event
 from jobwinner.throttle import RequestThrottle, SendWindowChecker, ProgressiveBackoff, should_take_day_off
@@ -164,6 +165,257 @@ def _sleep_or_stop(seconds: float, stop_event) -> bool:
         return bool(stop_event.wait(seconds))
     time.sleep(seconds)
     return False
+
+
+# ────────────────────────────────────────────────────────────────
+# 智联招聘：投递 + 招呼语发送（适配器 supports_send=True）
+# 实测定稿（2026-08-31 登录态）：
+#   岗位页「立即投递」→ 弹窗选简历(.a-attachment-select__item)
+#   →「投递简历」(.a-attachment-select__action-btn__delivery) → 平台自动带默认
+#   打招呼语投递（无自定义输入框）→ 按钮变「继续沟通」
+#   → 进入 i.zhaopin.com/im 会话 → textarea.im-sender__input
+#   → type_text 输入自定义招呼语 → Enter 发送（按Enter键发送）
+# ────────────────────────────────────────────────────────────────
+
+
+def _zhaopin_page_state(target_id: str) -> dict:
+    """Detect the zhaopin job detail page apply state."""
+    js = """
+    (() => {
+        const norm = (s) => (s || '').trim();
+        const findBtn = (text) => Array.from(document.querySelectorAll('button, a, div[role="button"], [class*="button"]'))
+            .find((e) => norm(e.innerText) === text);
+        const apply = !!findBtn('立即投递');
+        const cont = !!findBtn('继续沟通');
+        return JSON.stringify({
+            state: apply ? 'apply' : (cont ? 'continue' : 'unknown')
+        });
+    })()
+    """
+    return _parse_js_result(evaluate(target_id, js))
+
+
+def _zhaopin_click_button(target_id: str, text: str) -> bool:
+    """Click the zhaopin action whose visible text matches exactly."""
+    text_json = json.dumps(text, ensure_ascii=False)
+    js = """
+    (() => {
+        const text = __TEXT__;
+        const el = Array.from(document.querySelectorAll('button, a, div[role="button"], [class*="button"]'))
+            .find((e) => (e.innerText || '').trim() === text);
+        if (!el) return JSON.stringify({ok: false});
+        el.click();
+        return JSON.stringify({ok: true});
+    })()
+    """
+    result = _parse_js_result(evaluate(target_id, js.replace("__TEXT__", text_json)))
+    return bool(result.get("ok"))
+
+
+_ZHAOPIN_RESUME_PICK_JS = """
+(() => {
+    const kw = '__RESUME_KW__';
+    const items = Array.from(document.querySelectorAll('.a-attachment-select__item, [class*="modal"] [class*="item"], [class*="modal"] li'));
+    const hit = items.find((e) => {
+        const txt = (e.innerText || '').trim();
+        return txt.includes(kw) && (txt.includes('简历') || txt.includes('在线'));
+    }) || items[0];
+    if (!hit) return JSON.stringify({ok: false});
+    hit.click();
+    return JSON.stringify({ok: true});
+})()
+"""
+
+_ZHAOPIN_DELIVER_SUBMIT_JS = """
+(() => {
+    const el = Array.from(document.querySelectorAll('.a-attachment-select__action-btn__delivery, [class*="modal"] a, [class*="modal"] button'))
+        .find((e) => (e.innerText || '').trim() === '投递简历');
+    if (!el) return JSON.stringify({ok: false});
+    el.click();
+    return JSON.stringify({ok: true});
+})()
+"""
+
+
+def _zhaopin_apply(target_id: str, resume_keyword: str, stop_event) -> dict:
+    """Click 立即投递 → pick resume → submit delivery (real apply)."""
+    if not _zhaopin_click_button(target_id, "立即投递"):
+        return {"success": False, "error": "no_apply_button", "history_detail": "未找到「立即投递」按钮"}
+    if _sleep_or_stop(2.5, stop_event):
+        return {"success": False, "error": "stopped", "skip_backoff": True}
+
+    kw = json.dumps(resume_keyword or "在线", ensure_ascii=False)
+    picked = _parse_js_result(evaluate(target_id, _ZHAOPIN_RESUME_PICK_JS.replace("__RESUME_KW__", kw)))
+    if not picked.get("ok"):
+        return {"success": False, "error": "resume_pick_failed", "history_detail": "投递弹窗中未找到简历选项"}
+    if _sleep_or_stop(1.2, stop_event):
+        return {"success": False, "error": "stopped", "skip_backoff": True}
+
+    submitted = _parse_js_result(evaluate(target_id, _ZHAOPIN_DELIVER_SUBMIT_JS))
+    if not submitted.get("ok"):
+        return {"success": False, "error": "deliver_submit_failed", "history_detail": "未找到「投递简历」提交按钮"}
+    # 等投递完成（弹窗出现「已向对方发送简历和打招呼语」/按钮切换）
+    for _ in range(4):
+        if _stop_requested(stop_event):
+            return {"success": False, "error": "stopped", "skip_backoff": True}
+        if _sleep_or_stop(1.0, stop_event):
+            return {"success": False, "error": "stopped", "skip_backoff": True}
+        state = _zhaopin_page_state(target_id)
+        if state.get("state") != "apply":
+            return {"success": True}
+    return {"success": False, "error": "deliver_timeout", "history_detail": "投递未确认成功（弹窗未切换状态）", "skip_backoff": True}
+
+
+def _zhaopin_open_chat(target_id: str, stop_event) -> dict:
+    """Click 继续沟通 (post-deliver) and wait for the IM session input."""
+    if not _zhaopin_click_button(target_id, "继续沟通"):
+        return {"success": False, "error": "no_chat_entry", "history_detail": "未找到「继续沟通」入口"}
+    for _ in range(15):
+        if _stop_requested(stop_event):
+            return {"success": False, "error": "stopped", "skip_backoff": True}
+        info = _parse_js_result(evaluate(target_id, """
+        (() => {
+            const hasInput = !!document.querySelector('textarea.im-sender__input, [contenteditable="true"].im-sender__input');
+            return JSON.stringify({ hasInput });
+        })()
+        """))
+        if info.get("hasInput"):
+            return {"success": True}
+        if _sleep_or_stop(1, stop_event):
+            return {"success": False, "error": "stopped", "skip_backoff": True}
+    return {"success": False, "error": "chat_not_ready", "history_detail": "会话页未就绪（找不到消息输入框）"}
+
+
+_ZHAOPIN_SEND_VERIFY_JS = """
+(() => {
+    const input = document.querySelector('textarea.im-sender__input, [contenteditable="true"].im-sender__input');
+    const norm = (s) => (s || '').replace(/\s+/g, '').trim();
+    const expected = norm('__GREETING__');
+    const cur = norm(input ? (input.value || input.innerText || '') : '');
+    const sent = Array.from(document.querySelectorAll('[class*="message"], [class*="msg"], [class*="bubble"], [class*="dialog"]'))
+        .some((e) => {
+            const t = norm(e.innerText);
+            return t.length > 0 && t.includes(expected.slice(0, 18));
+        });
+    return JSON.stringify({ cleared: cur.length === 0, sent });
+})()
+"""
+
+
+def _send_zhaopin_greeting_once_locked(
+    job: dict,
+    greeting: str,
+    throttle_config: dict,
+    resume_keyword: str = "在线",
+    phase_callback=None,
+) -> tuple[dict, str | None]:
+    """Deliver the resume on zhaopin, then send the custom greeting in IM."""
+    stop_event = throttle_config.get("_workbench_stop_event")
+    target_id = new_tab(job["url"], background=True)
+    if not target_id:
+        return {"success": False, "error": "open_page_failed", "history_detail": "无法打开页面", "skip_backoff": True}, None
+
+    if _stop_requested(stop_event):
+        close_tab(target_id)
+        return {"success": False, "error": "stopped", "skip_backoff": True}, None
+
+    # 等页面加载完成（SPA 首屏可能较慢）
+    wait_for_load(target_id, timeout=12)
+    if _stop_requested(stop_event):
+        close_tab(target_id)
+        return {"success": False, "error": "stopped", "skip_backoff": True}, None
+
+    # 模拟浏览（防检测，与 BOSS 发送一致）
+    browse_min = throttle_config.get("browse_duration_min", 15)
+    browse_max = throttle_config.get("browse_duration_max", 30)
+    if throttle_config.get("browse_before_greet", True):
+        import random
+        browse_time = random.uniform(browse_min, browse_max)
+        if phase_callback:
+            try:
+                phase_callback(job, "browsing", {"browse_seconds": browse_time})
+            except Exception:
+                pass
+        if _sleep_or_stop(browse_time, stop_event):
+            close_tab(target_id)
+            return {"success": False, "error": "stopped", "skip_backoff": True}, None
+        if phase_callback:
+            try:
+                phase_callback(job, "browsed", {})
+            except Exception:
+                pass
+
+    # 等投递/沟通按钮出现（页面 SPA 渲染完成后才有）
+    state = _zhaopin_page_state(target_id)
+    for _ in range(6):
+        if state.get("state") != "unknown":
+            break
+        if _sleep_or_stop(1, stop_event):
+            close_tab(target_id)
+            return {"success": False, "error": "stopped", "skip_backoff": True}, None
+        state = _zhaopin_page_state(target_id)
+
+    if state.get("state") == "apply":
+        apply_result = _zhaopin_apply(target_id, resume_keyword, stop_event)
+        if not apply_result.get("success"):
+            close_tab(target_id)
+            return apply_result, None
+        if _sleep_or_stop(1.5, stop_event):
+            close_tab(target_id)
+            return {"success": False, "error": "stopped", "skip_backoff": True}, None
+    elif state.get("state") not in {"continue"}:
+        close_tab(target_id)
+        return {"success": False, "error": "no_apply_button", "history_detail": "未找到投递/沟通入口，岗位可能已下架", "skip_backoff": True}, None
+
+    # 进入会话发送自定义招呼语（best-effort；投递本身已成功）
+    chat_result = _zhaopin_open_chat(target_id, stop_event)
+    if chat_result.get("error") == "stopped":
+        close_tab(target_id)
+        return chat_result, None
+    greeting_sent = False
+    chat_detail = ""
+    if chat_result.get("success"):
+        if type_text(target_id, greeting, human=False):
+            if _sleep_or_stop(0.8, stop_event):
+                close_tab(target_id)
+                return {"success": False, "error": "stopped", "skip_backoff": True}, None
+            if press_key(target_id, "Enter"):
+                if _sleep_or_stop(1.6, stop_event):
+                    close_tab(target_id)
+                    return {"success": False, "error": "stopped", "skip_backoff": True}, None
+                g_json = json.dumps(greeting, ensure_ascii=False)
+                check = _parse_js_result(evaluate(target_id, _ZHAOPIN_SEND_VERIFY_JS.replace("__GREETING__", g_json)))
+                greeting_sent = bool(check.get("cleared") or check.get("sent"))
+            else:
+                chat_detail = "发送键触发失败"
+        else:
+            chat_detail = "招呼语输入失败"
+    else:
+        chat_detail = chat_result.get("history_detail", "会话未就绪")
+    close_tab(target_id)
+
+    if greeting_sent:
+        return {"success": True, "greeting_sent": True, "history_detail": "已投递简历并发送招呼语"}, None
+    return {"success": True, "greeting_sent": False, "history_detail": "已投递简历（招呼语补充未确认：%s）" % chat_detail}, None
+
+
+def _send_zhaopin_greeting_once(
+    job: dict,
+    greeting: str,
+    throttle_config: dict,
+    resume_keyword: str = "在线",
+    phase_callback=None,
+) -> tuple[dict, str | None]:
+    """Serialize zhaopin browser ops under the zhaopin platform lock."""
+    from jobwinner.channels import get_channel
+
+    lock_key = get_channel("zhaopin").lock_key
+    with platform_browser_lock(lock_key).context(BrowserPriority.DELIVER):
+        return _send_zhaopin_greeting_once_locked(
+            job, greeting, throttle_config,
+            resume_keyword=resume_keyword,
+            phase_callback=phase_callback,
+        )
 
 
 def _detect_greet_popup(target_id: str) -> dict:
@@ -1090,10 +1342,17 @@ def send_greetings(config: dict, force: bool = False) -> int:
                 elif phase == "browsed":
                     report_send_progress(job_info, "sending")
 
-            result_data, failed_target_id = _send_greeting_once(
-                job, greeting, throttle_config,
-                phase_callback=job_phase_cb,
-            )
+            if (job.get("channel") or "bosszp") == "zhaopin":
+                result_data, failed_target_id = _send_zhaopin_greeting_once(
+                    job, greeting, throttle_config,
+                    resume_keyword=config.get("channels", {}).get("zhaopin", {}).get("resume", "在线"),
+                    phase_callback=job_phase_cb,
+                )
+            else:
+                result_data, failed_target_id = _send_greeting_once(
+                    job, greeting, throttle_config,
+                    phase_callback=job_phase_cb,
+                )
             if result_data.get("error") == "stopped":
                 send_report["stop_reason"] = "stopped"
                 break

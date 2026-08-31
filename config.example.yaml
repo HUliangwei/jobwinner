@@ -96,7 +96,8 @@ channels:
   bosszp:
     enabled: true           # Boss直聘（zhipin.com）
   zhaopin:
-    enabled: true           # 智联招聘（zhaopin.com）：采集/评分已支持，发送待接入
+    enabled: true           # 智联招聘（zhaopin.com）：采集/评分/投递+招呼语已支持
+    resume: "在线"          # 投递时选用的简历（文件名关键词，如 "具身智能"；"在线"=在线简历）
   # 示例：后续新增渠道时在此追加
   # liepin:
   #   enabled: false

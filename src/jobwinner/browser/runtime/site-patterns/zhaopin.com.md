@@ -63,7 +63,9 @@ updated: 2026-08-31
 - **详情页不再需要**：列表 state 已含 JD/公司/薪资 → 适配器 `detail_required=False`，采集只开列表页（省掉每岗位一次详情页加载）。
 - 每次 evaluate 直读 ≈10ms，且不产生点击风控特征；Runtime 5s 命令超时完全无压力。
 - **翻页暂不可用**：新版 SPA 忽略 `?page=N`，滚动/无分页控件（登录墙下 UI 降级），`hasMore` 恒 true 但无触发入口 → `pages_cap=1`，每城市×关键词取 20 条/页。登录后若解锁翻页控件再放开。
-- 智联无「打招呼→聊天」稳定链路可用（登录、风控、模态框未接），适配器 `supports_send=False`，发送/监测会优雅跳过。
+- **发送已接入（投递 + 招呼语，2026-08-31 实测定稿）**：岗位页「立即投递」→ 弹窗选简历(`.a-attachment-select__item`，按配置 `channels.zhaopin.resume` 关键词匹配，含"简历/在线"字样)→「投递简历」(`.a-attachment-select__action-btn__delivery`)→ 平台自动带默认招呼语投递 → 按钮变「继续沟通」→ 点击进入 `i.zhaopin.com/im` 会话 → `textarea.im-sender__input` 输入自定义招呼语 → Enter 发送。发送器：`executor/sender.py::_send_zhaopin_greeting_once`，锁使用 `zhaopin` 平台锁。
+- 已投递岗位再发送时直接走「继续沟通」路径（幂等）。
+- 监测（消息中心回复检测）尚未接入：回复发生在 `i.zhaopin.com/im` 会话页，后续在 monitor 中补。
 
 ## 尝试过的失败路径（勿重复踩）
 - **逐卡点击读取右侧面板**：2026-08-31 首次可用（9 条），但多次高频点击后风控冻结面板（view-all href 不再随点击变化），且 `.job-list-login-gate` 激活。不可作为稳定方案。

@@ -119,14 +119,15 @@ class ZhaopinAdapter(ChannelAdapter):
     city_codes = ZHAOPIN_CITY_CODES
     js_extract_list = JS_EXTRACT_LIST
     js_extract_detail = JS_EXTRACT_DETAIL
-    default_chat_url = ""  # 智联沟通页暂未接入监测/发送
-    supports_send = False  # 打招呼/发送暂未接入（调用侧会优雅跳过）
+    # 监测（消息中心回复检测）尚未接入；投递+招呼语发送已走专属链路。
+    default_chat_url = ""
+    # 投递 + 招呼语发送已接入（executor/sender.py 的 _send_zhaopin_greeting_once 链路）。
+    supports_send = True
 
     # 新版 SPA 忽略 ?page=N，列表页 20 条/页；登录后可能解锁翻页控件再放开。
     pages_cap = 1
     # 列表页 __INITIAL_STATE__ 已含完整 JD/真实薪资，无需逐条开详情页。
     detail_required = False
-    supports_send = False
 
     def generate_job_id(self, url: str) -> str:
         """智联岗位 URL 形如 /jobdetail/CC315847110J40875174507.htm，
