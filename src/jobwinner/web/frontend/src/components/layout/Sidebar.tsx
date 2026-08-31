@@ -50,7 +50,7 @@ export function Sidebar({ pendingReplies: pendingRepliesProp }: SidebarProps) {
           </div>
           <div>
             <div className="font-black text-sm tracking-tight text-foreground">JobWinner</div>
-            <div className="text-[11px] text-muted">v2.3 · 本地控制台</div>
+            <div className="text-[11px] text-muted">v2.4 · 本地控制台</div>
           </div>
         </div>
       </div>
