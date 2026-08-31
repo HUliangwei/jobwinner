@@ -65,7 +65,8 @@ updated: 2026-08-31
 - **翻页暂不可用**：新版 SPA 忽略 `?page=N`，滚动/无分页控件（登录墙下 UI 降级），`hasMore` 恒 true 但无触发入口 → `pages_cap=1`，每城市×关键词取 20 条/页。登录后若解锁翻页控件再放开。
 - **发送已接入（投递 + 招呼语，2026-08-31 实测定稿）**：岗位页「立即投递」→ 弹窗选简历(`.a-attachment-select__item`，按配置 `channels.zhaopin.resume` 关键词匹配，含"简历/在线"字样)→「投递简历」(`.a-attachment-select__action-btn__delivery`)→ 平台自动带默认招呼语投递 → 按钮变「继续沟通」→ 点击进入 `i.zhaopin.com/im` 会话 → `textarea.im-sender__input` 输入自定义招呼语 → Enter 发送。发送器：`executor/sender.py::_send_zhaopin_greeting_once`，锁使用 `zhaopin` 平台锁。
 - 已投递岗位再发送时直接走「继续沟通」路径（幂等）。
-- 监测（消息中心回复检测）尚未接入：回复发生在 `i.zhaopin.com/im` 会话页，后续在 monitor 中补。
+- **监测已接入（2026-08-31 实测定稿）**：`executor/monitor.py::_check_zhaopin_channel_replies` 打开 `i.zhaopin.com/im` → `JS_EXTRACT_CHAT_LIST_ZHAOPIN` 抽取会话（`.im-session-item` 的 `__name/__company-name/__job/__preview-row/__badge`）→ 判定 HR 回复：未读徽标 `.im-session-item__badge` > 0 或 预览非我方消息（`已发送附件简历`/`已投递`/我方招呼语文本）→ `_match_zhaopin_conversation_to_job` 按 公司+岗位 三档匹配 DB 岗位 → 更新 replied + add_history。已随 `check_replies` 与 BOSS 并行监测。
+- IP/账号注意：`i.zhaopin.com`（im 消息中心）与 `www.zhaopin.com`（采集/投递）是同账号体系，登录态复用。
 
 ## 尝试过的失败路径（勿重复踩）
 - **逐卡点击读取右侧面板**：2026-08-31 首次可用（9 条），但多次高频点击后风控冻结面板（view-all href 不再随点击变化），且 `.job-list-login-gate` 激活。不可作为稳定方案。

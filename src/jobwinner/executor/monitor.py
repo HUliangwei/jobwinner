@@ -83,6 +83,41 @@ JS_EXTRACT_CHAT_LIST = """
 """
 
 # JS: Extract full conversation messages from an open chat, including rich/system cards
+# JS: Extract zhaopin IM session list (i.zhaopin.com/im)
+JS_EXTRACT_CHAT_LIST_ZHAOPIN = r"""
+(() => {
+    const items = document.querySelectorAll('.im-session-item');
+    const results = [];
+    items.forEach((item) => {
+        const q = (sel) => {
+            const el = item.querySelector(sel);
+            return el ? (el.innerText || '').replace(/\s+/g, ' ').trim() : '';
+        };
+        const preview = q('.im-session-item__preview-row');
+        const timeMatch = preview.match(/\s+(\d{1,2}:\d{2}|\d+月\d+日)\s*$/);
+        const lastMessage = timeMatch ? preview.slice(0, timeMatch.index).trim() : preview;
+        const lastTime = timeMatch ? timeMatch[1] : '';
+        const badge = item.querySelector('.im-session-item__badge');
+        const unread = badge ? (parseInt((badge.innerText || '0').trim(), 10) || 0) : 0;
+        const hrName = q('.im-session-item__name');
+        const company = q('.im-session-item__company-name');
+        if (!hrName && !company) return;
+        results.push({
+            hr_name: hrName,
+            company: company,
+            hr_title: q('.im-session-item__job'),
+            job_title: q('.im-session-item__job'),
+            salary: q('.im-session-item__salary'),
+            last_message: lastMessage.substring(0, 200),
+            last_time: lastTime,
+            unread: unread,
+            element_index: results.length,
+        });
+    });
+    return JSON.stringify(results);
+})()
+"""
+
 JS_EXTRACT_CONVERSATION = r"""
 (() => {
     const MESSAGE_SELECTORS = '.chat-message, .message-item';
@@ -771,12 +806,16 @@ def check_replies(config: dict) -> list[dict]:
     needs_resume_jobs = get_jobs_by_status(db, "needs_resume")
     all_tracked_jobs = sent_jobs + replied_jobs + resume_sent_jobs + follow_up_jobs + needs_resume_jobs
 
-    if not all_tracked_jobs:
+    # 按渠道分流：BOSS 走原聊天列表链路，智联走 im 消息中心链路。
+    boss_jobs = [j for j in all_tracked_jobs if str(j.get("channel") or "") != "zhaopin"]
+    zhaopin_jobs = [j for j in all_tracked_jobs if str(j.get("channel") or "") == "zhaopin"]
+    if not boss_jobs and not zhaopin_jobs:
         console.print("[dim]没有需要监测的对话[/dim]")
         db.close()
         return []
 
-    console.print(f"[bold]监测 {len(all_tracked_jobs)} 个对话的回复情况...[/bold]")
+    if boss_jobs:
+        console.print(f"[bold]监测 {len(boss_jobs)} 个对话的回复情况...[/bold]")
 
     # Open chat page. 监测读聊天列表也操作浏览器，纳入平台锁（低优先级，
     # 发送/采集持锁时它排队；它持锁时发送可插队）。
@@ -830,7 +869,7 @@ def check_replies(config: dict) -> list[dict]:
         if not conv.get("has_reply"):
             continue
 
-        matched_job = _match_conversation_to_job(conv, all_tracked_jobs)
+        matched_job = _match_conversation_to_job(conv, boss_jobs)
         if matched_job:
             # Update status to replied if it was 'sent'
             if matched_job.get("status") == "sent":
@@ -844,6 +883,9 @@ def check_replies(config: dict) -> list[dict]:
             console.print(
                 f"[green]  ✓ {matched_job['company']} - {matched_job['title']} 有新回复[/green]"
             )
+
+    if zhaopin_jobs:
+        results += _check_zhaopin_channel_replies(config, zhaopin_jobs, db)
 
     if not results:
         console.print("[dim]暂无新回复[/dim]")
@@ -889,6 +931,102 @@ def _match_conversation_to_job(conv: dict, jobs: list[dict]) -> dict | None:
 
     return None
 
+
+def _match_zhaopin_conversation_to_job(conv: dict, jobs: list[dict]) -> dict | None:
+    """Match a zhaopin IM session to a tracked job (company + job title).
+
+    zhaopin job records carry no hr_name (list data lacks HR names), so matching
+    goes: exact company+title, then substring company+title, then company-only.
+    """
+    norm = lambda s: (s or "").replace(" ", "").strip()
+    conv_company = norm(conv.get("company"))
+    conv_title = norm(conv.get("job_title"))
+    if not conv_company:
+        return None
+
+    # exact company + title
+    for job in jobs:
+        if conv_company == norm(job.get("company")) and conv_title and conv_title == norm(job.get("title")):
+            return job
+
+    # substring company + title
+    for job in jobs:
+        jc, jt = norm(job.get("company")), norm(job.get("title"))
+        if jc and (jc in conv_company or conv_company in jc) and jt and conv_title and (jt in conv_title or conv_title in jt):
+            return job
+
+    # company-only (duplicate titles under one company resolve above)
+    for job in jobs:
+        jc = norm(job.get("company"))
+        if jc and (jc == conv_company or jc in conv_company or conv_company in jc):
+            return job
+    return None
+
+
+def _check_zhaopin_channel_replies(config: dict, jobs: list[dict], db) -> list[dict]:
+    """Open the zhaopin IM center and detect HR replies for tracked jobs.
+
+    List-level detection: unread badge > 0, or the session preview is not one of
+    our own messages ("已发送附件简历" deliver notice / the greeting we sent).
+    """
+    monitor_cfg = config.get("monitor", {})
+    chat_url = monitor_cfg.get("zhaopin_chat_url") or "https://i.zhaopin.com/im"
+    with platform_browser_lock("zhaopin").context(BrowserPriority.MONITOR):
+        target_id = new_tab(chat_url, background=True)
+        if not target_id:
+            console.print("[red]无法打开智联消息中心[/red]")
+            return []
+        if _wait_or_stop(config, 3) or not _wait_for_page_or_stop(target_id, config, timeout=10):
+            close_tab(target_id)
+            return []
+        if _wait_or_stop(config, 2):
+            close_tab(target_id)
+            return []
+        raw = evaluate(target_id, JS_EXTRACT_CHAT_LIST_ZHAOPIN)
+        close_tab(target_id)
+
+    if stop_requested(config):
+        return []
+    if not raw:
+        console.print("[yellow]未能获取智联会话列表[/yellow]")
+        return []
+    try:
+        conversations = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        console.print("[yellow]智联会话列表解析失败[/yellow]")
+        return []
+    if not conversations:
+        console.print("[dim]智联会话列表为空[/dim]")
+        return []
+
+    results = []
+    for conv in conversations:
+        if stop_requested(config):
+            break
+        last = (conv.get("last_message") or "").strip()
+        unread = int(conv.get("unread") or 0)
+        is_our = last in {"已发送附件简历", "已投递"}
+        matched = _match_zhaopin_conversation_to_job(conv, jobs)
+        if matched:
+            gre = (matched.get("greeting") or "").replace(" ", "")
+            if gre and last.replace(" ", "") == gre:
+                is_our = True
+        has_reply = bool(last) and (unread > 0 or not is_our)
+        conv["has_reply"] = has_reply
+        conv["is_our_message"] = bool(last) and not has_reply
+        if not has_reply:
+            continue
+        if not matched:
+            continue
+        if matched.get("status") == "sent":
+            update_job_status(db, matched["id"], "replied")
+            add_history(db, matched["id"], "replied", f"HR回复: {last[:50]}")
+        results.append({"job": matched, "conversation": conv})
+        console.print(f"[green]  ✓ {matched['company']} - {matched['title']} 有新回复（智联）[/green]")
+
+    if not results:
+        console.print("[dim]智联暂无新回复[/dim]")
+    return results
 
 @_browser_locked(None, BrowserPriority.MONITOR)
 def _handle_conversation(job: dict, config: dict) -> str:

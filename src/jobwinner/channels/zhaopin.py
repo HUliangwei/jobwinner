@@ -119,8 +119,8 @@ class ZhaopinAdapter(ChannelAdapter):
     city_codes = ZHAOPIN_CITY_CODES
     js_extract_list = JS_EXTRACT_LIST
     js_extract_detail = JS_EXTRACT_DETAIL
-    # 监测（消息中心回复检测）尚未接入；投递+招呼语发送已走专属链路。
-    default_chat_url = ""
+    # 监测（消息中心回复检测）已接入：executor/monitor.py::_check_zhaopin_channel_replies。
+    default_chat_url = "https://i.zhaopin.com/im"
     # 投递 + 招呼语发送已接入（executor/sender.py 的 _send_zhaopin_greeting_once 链路）。
     supports_send = True
 
