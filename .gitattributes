@@ -11,3 +11,7 @@
 *.mov binary
 *.webm binary
 *.mp3 binary
+
+# Windows 批处理必须 CRLF 才能被 cmd.exe 正确解析（LF 会导致 %~dp0 变量拼接错乱）
+*.cmd text eol=crlf
+*.bat text eol=crlf

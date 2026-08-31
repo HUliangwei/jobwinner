@@ -266,6 +266,16 @@ def ensure_runtime(config: dict[str, Any] | None = None, wait_seconds: float = 1
         return False
 
     health = runtime_health(browser)
+    if health and health.get("runtime") == "jobwinner":
+        # 已有 JobWinner 浏览器运行组件在跑：不要重复拉起 node 代理进程
+        # （否则每次刷新看板都会积攒一堆 node 进程），等待它连上 Chrome 即可。
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline:
+            if runtime_targets(browser) is not None:
+                set_browser_config(browser)
+                return True
+            time.sleep(0.5)
+        return False
     if health and health.get("runtime") != "jobwinner":
         fallback_port = _find_available_runtime_port(browser)
         if fallback_port is None:
