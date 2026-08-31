@@ -39,6 +39,13 @@ throttle:
   send_windows:
     - "09:00-17:00"
   day_off_probability: 0.05
+  # 双渠道独立分控：每个渠道有自己的日配额 / 发送间隔 / 退避（互不拖累）。
+  # 不写的渠道用上面的全局值；风控(rate_limit/captcha/blocked)只暂停对应渠道。
+  channel_overrides:
+    zhaopin:
+      daily_limit: 15        # 智联每日投递数（独立于 BOSS）
+      interval_min: 45       # 智联两次发送的最小间隔（秒）
+      interval_max: 90       # 智联两次发送的最大间隔（秒）
 
 ai:
   provider: "anthropic"

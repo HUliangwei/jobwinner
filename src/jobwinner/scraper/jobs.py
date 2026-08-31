@@ -64,7 +64,16 @@ def scrape_jobs(
     db = get_db()
     stop_event = get_stop_event(config)
     channels = get_active_channels(config)
-    throttle = PageThrottle(delay_min=2.0, delay_max=5.0)
+    # Per-channel collection throttle: each active channel keeps its own
+    # PageThrottle so a slow/waiting platform never stalls the other.
+    page_throttles: dict[str, PageThrottle] = {}
+
+    def throttle_for(channel_key: str) -> PageThrottle:
+        th = page_throttles.get(channel_key)
+        if th is None:
+            th = PageThrottle(delay_min=2.0, delay_max=5.0)
+            page_throttles[channel_key] = th
+        return th
     deal_breakers = config.get("profile", {}).get("deal_breakers", [])
     jd_deal_breakers = config.get("profile", {}).get("jd_deal_breakers", [])
     progress_callback = config.get("_workbench_collect_progress")
@@ -218,7 +227,7 @@ def scrape_jobs(
                         if channel.detail_required:
                             # 打开详情页抽取完整信息（默认行为，如 BOSS）。
                             # 详情页操作也在平台锁内，避免与发送/监测并发破坏页面状态。
-                            if throttle.wait(stop_event):
+                            if throttle_for(channel.key).wait(stop_event):
                                 break
                             with platform_browser_lock(channel.lock_key).context(BrowserPriority.COLLECT):
                                 detail_target = new_tab(detail_url, background=True)

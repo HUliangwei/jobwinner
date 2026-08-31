@@ -95,6 +95,9 @@ DEFAULTS: dict[str, Any] = {
         "browse_duration_max": 30,
         "send_windows": ["09:00-16:00"],
         "day_off_probability": 0.05,
+        # 每渠道独立分控覆盖：channel_overrides.<key> 可单独设 daily_limit /
+        # interval_min / interval_max / browse_* 等（其余键回退全局值）。
+        "channel_overrides": {},
     },
     "ai": {
         "provider": "anthropic",

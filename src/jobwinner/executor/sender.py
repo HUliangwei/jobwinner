@@ -1194,6 +1194,24 @@ def _send_greeting_once_locked(
     }, target_id
 
 
+
+
+def _merge_channel_throttle(channel_key: str, throttle_config: dict) -> dict:
+    """Global throttle + per-channel overrides (throttle.channel_overrides.<key>).
+
+    Keys present in the channel override (except channel_overrides itself) replace
+    the global values, so each platform can keep its own quota / interval / browsing
+    profile while sharing the rest of the anti-ban policy.
+    """
+    merged = dict(throttle_config)
+    merged.pop("channel_overrides", None)
+    override = (throttle_config.get("channel_overrides") or {}).get(channel_key) or {}
+    if override:
+        for key, value in override.items():
+            merged[key] = value
+    return merged
+
+
 def send_greetings(config: dict, force: bool = False) -> int:
     """Send generated greetings. Returns count of successfully sent."""
     set_active_channel(get_active_channel(config))
@@ -1252,32 +1270,79 @@ def send_greetings(config: dict, force: bool = False) -> int:
         db.close()
         return 0
 
-    # Check daily limit
+    # Per-channel anti-ban split: bosszp / zhaopin get INDEPENDENT daily quota,
+    # send interval and progressive backoff, so one platform being rate-limited
+    # or busy never throttles the other. Config: throttle.channel_overrides.<key>.
     daily_limit = throttle_config.get("daily_limit", 30)
     interval_min = throttle_config.get("interval_min", 60)
     interval_max = throttle_config.get("interval_max", 180)
 
-    # Count today's sent
-    today_sent = db.execute(
-        "SELECT COUNT(*) as cnt FROM history WHERE action='sent' AND date(created_at)=date('now')"
-    ).fetchone()
-    already_sent = today_sent["cnt"] if today_sent else 0
+    def _today_sent_for_channel(channel_key: str) -> int:
+        # 历史岗位的 channel 可能为空/旧数据，一律计入默认主渠道（bosszp）。
+        if channel_key in ("", "bosszp"):
+            row = db.execute(
+                "SELECT COUNT(*) as cnt FROM history h JOIN jobs j ON h.job_id=j.id "
+                "WHERE h.action='sent' AND date(h.created_at)=date('now') "
+                "AND (j.channel IS NULL OR j.channel='' OR j.channel='bosszp')"
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT COUNT(*) as cnt FROM history h JOIN jobs j ON h.job_id=j.id "
+                "WHERE h.action='sent' AND date(h.created_at)=date('now') "
+                "AND j.channel=?", (channel_key,)
+            ).fetchone()
+        return row["cnt"] if row else 0
 
-    remaining_quota = daily_limit - already_sent
-    if remaining_quota <= 0:
-        console.print(f"[yellow]今日已达发送上限 ({daily_limit})[/yellow]")
-        send_report["quota_deferred_count"] = len(jobs)
+
+    channel_states: dict[str, dict] = {}
+    jobs_to_send = []
+    quota_deferred = 0
+    for job in jobs:
+        ch = str(job.get("channel") or "bosszp")
+        st = channel_states.get(ch)
+        if st is None:
+            tc = _merge_channel_throttle(ch, throttle_config)
+            st = {
+                "key": ch,
+                "limit": int(tc.get("daily_limit", daily_limit)),
+                "sent_today": _today_sent_for_channel(ch),
+                "interval_min": float(tc.get("interval_min", interval_min)),
+                "interval_max": float(tc.get("interval_max", interval_max)),
+                "throttle": None,
+                "backoff": None,
+                "interval_used": False,
+                "risk_paused": False,
+            }
+            channel_states[ch] = st
+        remaining = st["limit"] - st["sent_today"] - len(st.setdefault("scheduled", []))
+        if remaining <= 0:
+            quota_deferred += 1
+            continue
+        st["scheduled"].append(job)
+        jobs_to_send.append(job)
+
+    if not jobs_to_send:
+        console.print("[yellow]今日已达发送上限（按渠道分别计算）[/yellow]")
+        send_report["quota_deferred_count"] = max(quota_deferred, len(jobs))
         send_report["stop_reason"] = "daily_limit"
         db.close()
         return 0
 
-    jobs_to_send = jobs[:remaining_quota]
     send_report["scheduled_count"] = len(jobs_to_send)
-    send_report["quota_deferred_count"] = max(len(jobs) - len(jobs_to_send), 0)
-    if send_report["quota_deferred_count"]:
+    send_report["quota_deferred_count"] = quota_deferred
+    if quota_deferred:
         send_report["stop_reason"] = "daily_limit"
-    throttle = RequestThrottle(delay_min=interval_min, delay_max=interval_max)
-    backoff = ProgressiveBackoff()
+
+    def _state_throttle(st: dict) -> RequestThrottle:
+        if st["throttle"] is None:
+            st["throttle"] = RequestThrottle(delay_min=st["interval_min"], delay_max=st["interval_max"])
+        return st["throttle"]
+
+    def _state_backoff(st: dict) -> ProgressiveBackoff:
+        if st["backoff"] is None:
+            st["backoff"] = ProgressiveBackoff()
+        return st["backoff"]
+
     sent_count = 0
     progress_callback = config.get("_workbench_send_progress")
 
@@ -1299,7 +1364,8 @@ def send_greetings(config: dict, force: bool = False) -> int:
             # Progress reporting must never break the send loop
             pass
 
-    console.print(f"[bold]准备发送 {len(jobs_to_send)} 条招呼语[/bold] (今日已发 {already_sent}/{daily_limit})")
+    quota_note = " / ".join(f"{v['key']} {v['sent_today']}/{v['limit']}" for v in channel_states.values())
+    console.print(f"[bold]准备发送 {len(jobs_to_send)} 条招呼语[/bold] (今日已发 {quota_note})")
 
     with Progress(
         SpinnerColumn(),
@@ -1324,13 +1390,20 @@ def send_greetings(config: dict, force: bool = False) -> int:
                 progress.update(task, advance=1)
                 continue
 
-            # Wait between sends (except first)
-            if sent_count > 0:
+            ch = str(job.get("channel") or "bosszp")
+            st = channel_states[ch]
+            if st["risk_paused"]:
+                # 该渠道前方触发风控/连续错误暂停：跳过本岗位，其它渠道继续。
+                continue
+
+            # Wait between sends per channel (except the first send of this channel)
+            if st["interval_used"]:
                 progress.update(task, description="等待间隔...")
-                if throttle.wait(stop_event):
+                if _state_throttle(st).wait(stop_event):
                     console.print("[yellow]已请求停止，结束发送[/yellow]")
                     send_report["stop_reason"] = "stopped"
                     break
+            st["interval_used"] = True
 
             progress.update(task, description=f"发送: {job['company'][:10]} - {job['title'][:15]}")
             report_send_progress(job, "opening")
@@ -1376,12 +1449,12 @@ def send_greetings(config: dict, force: bool = False) -> int:
                     failed_target_id = None
 
             if result_data.get("success"):
-                throttle.mark()
+                _state_throttle(st).mark()
                 update_job_status(db, job["id"], "sent")
                 add_history(db, job["id"], "sent", greeting[:50])
                 sent_count += 1
                 send_report["sent_count"] = sent_count
-                backoff.record_success()
+                _state_backoff(st).record_success()
             else:
                 error = result_data.get("error", "unknown")
                 send_report["failed_count"] += 1
@@ -1401,25 +1474,28 @@ def send_greetings(config: dict, force: bool = False) -> int:
                     progress.update(task, advance=1)
                     continue
 
-                throttle.mark()
+                _state_throttle(st).mark()
 
-                # Progressive backoff on errors
+                # 风控信号：只暂停该渠道（后续本渠道岗位跳过），其它渠道继续。
+                if is_risk_signal:
+                    console.print(f"\n[red]⚠ 检测到风控信号: {error}，暂停 {st['key']} 渠道（其余渠道继续）[/red]")
+                    add_risk_event(db, error, f"触发风控: {error} ({st['key']})")
+                    st["risk_paused"] = True
+                    progress.update(task, advance=1)
+                    continue
+
+                # Progressive backoff on errors (per channel)
+                backoff = _state_backoff(st)
                 pause_duration = backoff.record_error()
-                add_risk_event(db, "send_error", f"{error} (连续{backoff._consecutive_errors}次)")
+                add_risk_event(db, "send_error", f"{error} (连续{backoff._consecutive_errors}次, {st['key']})")
 
-                # If we encounter rate limiting, stop immediately
-                if error in ["captcha", "rate_limit", "blocked"]:
-                    console.print(f"\n[red]⚠ 检测到风控信号: {error}，安全暂停[/red]")
-                    add_risk_event(db, error, f"触发风控: {error}")
-                    send_report["stop_reason"] = error
-                    break
-
-                # If too many consecutive errors, pause
+                # Too many consecutive errors: pause this channel only
                 if backoff.should_pause_long:
-                    console.print(f"\n[red]⚠ 连续错误过多，暂停 {int(pause_duration/60)} 分钟[/red]")
-                    add_risk_event(db, "backoff_pause", f"暂停{int(pause_duration)}秒")
-                    send_report["stop_reason"] = "consecutive_errors"
-                    break
+                    console.print(f"\n[red]⚠ {st['key']} 连续错误过多，暂停该渠道 {int(pause_duration/60)} 分钟[/red]")
+                    add_risk_event(db, "backoff_pause", f"{st['key']} 暂停{int(pause_duration)}秒")
+                    st["risk_paused"] = True
+                    progress.update(task, advance=1)
+                    continue
                 elif pause_duration > 0:
                     console.print(f"\n[yellow]  错误退避: 额外等待 {int(pause_duration)}秒[/yellow]")
                     if _sleep_or_stop(pause_duration, stop_event):

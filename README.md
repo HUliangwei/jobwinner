@@ -2,11 +2,11 @@
 
 # JobWinner
 
-> 基于 [BossHunter](https://github.com/powerycy/BossHunter) 个性化改造的某直聘智能求职 Agent —— 从岗位采集、AI 评分到人工确认投递、回复监测与定制简历生成的本地自动化流水线
+> 基于 [BossHunter](https://github.com/powerycy/BossHunter) 个性化改造的智能求职 Agent（**Boss直聘 + 智联招聘** 双渠道）—— 从岗位采集、AI 评分到人工确认投递、回复监测与定制简历生成的本地自动化流水线
 
 <p align="center">
   <a href="https://github.com/HUliangwei/jobwinner/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/HUliangwei/jobwinner?style=social"></a>
-  <a href="https://github.com/HUliangwei/jobwinner"><img alt="Version" src="https://img.shields.io/badge/version-v2.3.0-FB6511"></a>
+  <a href="https://github.com/HUliangwei/jobwinner"><img alt="Version" src="https://img.shields.io/badge/version-v2.4.0-FB6511"></a>
   <a href="https://www.python.org/"><img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="LICENSE"><img alt="Non-Commercial License" src="https://img.shields.io/badge/license-Non--Commercial-6f42c1"></a>
   <a href="https://github.com/HUliangwei/jobwinner/issues"><img alt="GitHub Issues" src="https://img.shields.io/github/issues/HUliangwei/jobwinner"></a>
@@ -47,6 +47,7 @@ JobWinner 是 **BossHunter** 的一个**个性化改造分支**，不是独立�
 | **发送失败可见** | 发送失败的岗位**保留在待发送列表**并标注「发送失败 + 原因」，不再静默消失 |
 | **额度延后可见** | 因每日额度未发出的岗位明确显示「因额度延后 N 个」，不会看着像卡住 |
 | **待评分真实计数** | 前端「待评分池」显示真实可评分岗位数，不再是误导性的假数字 |
+| **双渠道并行** | Boss直聘 + 智联招聘同时采集/评分/发送/监测；岗位在数据库与看板均标注来源（BOSS/智联），互不干扰 |
 
 ### 可靠性
 
@@ -65,10 +66,48 @@ JobWinner 是 **BossHunter** 的一个**个性化改造分支**，不是独立�
 - 发送时间窗口 09:00–22:00
 - 发送前模拟浏览岗位页 15–30s
 - 小概率随机休息日
+- **双渠道独立分控**：BOSS 与智联各自计算日配额、发送间隔与渐进退避（`throttle.channel_overrides`），互不拖累；一个平台触发风控只暂停该平台，另一个平台继续
 
 > 所有投递仍**必须经过人工确认**，不做完全无人值守的高频自动投递。
 
 ---
+
+## 🌐 双渠道架构：Boss直聘 + 智联招聘
+
+JobWinner 支持两个招聘渠道**同时启用**（`channels.active: ["bosszp", "zhaopin"]`），全流水线按渠道分派：
+
+| 环节 | Boss直聘 | 智联招聘 |
+|------|----------|----------|
+| 采集 | 搜索页列表 + 详情页（`PageThrottle` 独立节流） | 搜索页 `__INITIAL_STATE__` 直读（免点击、真实薪资、含全文 JD） |
+| 发送 | 岗位页「立即沟通」→ 聊天窗输入 AI 招呼语 | 「立即投递」→ 选简历（`channels.zhaopin.resume`）→ 平台默认招呼语投递 → 会话内补充自定义招呼语 |
+| 监测 | 聊天列表 zhipin.com 会话回复检测 | 消息中心 i.zhaopin.com/im 会话列表回复检测（未读徽标 / 预览文本） |
+| 来源标注 | DB `channel="bosszp"` + 看板「BOSS」 | DB `channel="zhaopin"` + 看板「智联」 |
+
+智联招聘特性：登录态与 BOSS 同账号体系复用；翻页上限暂为 1 页/城×词（`?page=N` 被忽略）；投递为一次性动作（无二次确认），发送器因此做了严格的状态机与幂等处理。
+
+### 双渠道独立分控（反风控）
+
+每个渠道拥有**独立**的日配额、发送间隔、渐进退避与页面节流：
+
+```yaml
+throttle:
+  daily_limit: 20          # BOSS 每日上限（全局默认）
+  interval_min: 120
+  interval_max: 300
+  channel_overrides:       # 渠道级覆盖：未写字段回退全局
+    zhaopin:
+      daily_limit: 15      # 智联每日投递数（独立累计）
+      interval_min: 60     # 智联发送间隔（秒）
+      interval_max: 120
+```
+
+行为要点：
+1. **配额按渠道计数**：今日已发按 `history ∪ jobs.channel` 分别统计，一个渠道满了不影响另一个。
+2. **间隔互不干扰**：两个平台各自的 `RequestThrottle` 独立计时，不存在互等。
+3. **风控只停本渠道**：`rate_limit / captcha / blocked` 信号仅暂停触发渠道的后续发送，另一渠道继续；连续错误退避同理。
+4. **采集同样分控**：每个渠道独立 `PageThrottle`（2–5s），页面慢/暂停不拖累另一个。
+
+> 采集与发送的浏览器操作仍走**平台锁**（`platform_browser_lock`）：同平台内采集/发送/监测互斥，跨平台可并行。
 
 ## 🚀 快速开始
 
@@ -181,7 +220,7 @@ jobwinner status --full        # 完整状态
 | `profile` | `resume_path`, `salary_min/max`, `deal_breakers` | 简历路径、期望薪资、排除词 |
 | `search` | `keywords`, `cities`, `max_pages` | 搜索策略 |
 | `scoring` | `threshold` | 评分阈值 |
-| `throttle` | `daily_limit`, `interval_min/max`, `send_windows` | 低频发送策略 |
+| `throttle` | `daily_limit`, `interval_min/max`, `send_windows`, `channel_overrides` | 低频发送策略；每渠道独立分控覆盖 |
 | `ai` | `service`, `provider`, `model`, `api_key`, `base_url` | AI 服务 |
 | `monitor` | `interval` | 监听设置 |
 | `follow_up` | `enabled`, `interval_hours` | 跟进策略 |
@@ -199,6 +238,7 @@ jobwinner status --full        # 完整状态
 5. **随机休息** — 小概率跳过当天
 6. **渐进退避** — 连续错误自动加长间隔
 7. **人工确认** — 所有投递必须人工审核
+8. **渠道独立分控** — BOSS / 智联各自累计配额、间隔与退避，一平台被风控不影响另一平台
 
 > 即便如此，**无法保证 100% 不被检测**。请自行评估风险，合理配置频率。
 
@@ -214,9 +254,9 @@ jobwinner status --full        # 完整状态
 
 ## 🗺️ 下一阶段规划
 
-- **扩展更多投递渠道**：当前以某直聘为核心渠道，后续将扩展支持更多招聘平台与投递入口，复用现有「AI 评分 + 人工确认 + 状态追踪」流水线。
-- 多平台统一状态看板：跨渠道聚合岗位与沟通状态。
-- 投递策略模板：按渠道/方向预设评分阈值与发送节奏。
+- **已支持 Boss直聘 + 智联招聘双渠道**（采集/评分/发送/监测按渠道分派、独立分控、来源标注）；后续可扩展更多平台入口，复用现有流水线。
+- 智联回复的自动应答/再发简历/跟进动作（对齐 BOSS 的 `_handle_conversation` 深度处理）。
+- 按渠道/方向预设评分阈值与发送节奏的投递策略模板。
 
 ---
 
