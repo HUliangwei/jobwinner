@@ -23,6 +23,7 @@ export const EMPTY_JOB_FILTERS: JobFilters = {
 
 export const CHANNEL_LABELS: Record<string, string> = {
   bosszp: 'Boss直聘',
+  zhaopin: '智联招聘',
   // 后续渠道在此追加，例如：
   // liepin: '猎聘',
   // qiancheng: '前程无忧',

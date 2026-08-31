@@ -89,10 +89,10 @@ browser:
   enable_port_guard: true
   site_patterns: true
 
-# 渠道配置：active 为当前启用的投递渠道
+# 渠道配置：active 为启用的投递渠道（可单值如 "bosszp"，也可列表表示多渠道并行采集）
 # 每个渠道一个适配器（src/jobwinner/channels/<key>.py），后续渠道在此追加
 channels:
-  active: "bosszp"          # 当前启用渠道（切换为 zhaopin 即走智联采集）
+  active: ["bosszp", "zhaopin"]   # 双渠道并行采集 + 评分（发送仍走 BOSS）
   bosszp:
     enabled: true           # Boss直聘（zhipin.com）
   zhaopin:

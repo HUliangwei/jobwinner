@@ -137,7 +137,8 @@ DEFAULTS: dict[str, Any] = {
         "site_patterns": True,
     },
     "channels": {
-        "active": "bosszp",
+        # active 支持单值（旧配置）或列表：["bosszp", "zhaopin"] 表示双渠道并行采集
+        "active": ["bosszp", "zhaopin"],
         "bosszp": {"enabled": True},
         "zhaopin": {"enabled": True},
     },

@@ -50,19 +50,45 @@ def get_channel(key: str, config: dict[str, Any] | None = None) -> ChannelAdapte
     return cls(config or {})
 
 
-def get_active_channel(config: dict[str, Any]) -> ChannelAdapter:
-    """Return the adapter for the configured active channel (default bosszp).
+def get_active_channels(config: dict[str, Any]) -> list[ChannelAdapter]:
+    """Return adapters for every configured active channel.
 
-    Also caches it process-wide so later ``current_channel()`` calls from deep
-    call chains (sender/monitor internals without config access) return the
-    same instance.
+    ``channels.active`` may be a single key (legacy) or a list of keys so
+    several platforms can be collected/scored in parallel. Unknown keys fall
+    back to ``bosszp`` just like `:func:`get_channel``.
     """
-    global _ACTIVE
+    _ensure_registry_loaded()
     channels_cfg = config.get("channels", {})
     if not isinstance(channels_cfg, dict):
         channels_cfg = {}
     active = channels_cfg.get("active", "bosszp") or "bosszp"
-    _ACTIVE = get_channel(str(active), config)
+    if isinstance(active, str):
+        keys = [active]
+    elif isinstance(active, (list, tuple, set)):
+        keys = list(active)
+    else:
+        keys = ["bosszp"]
+    seen_keys: list[str] = []
+    result: list[ChannelAdapter] = []
+    for key in keys:
+        adapter = get_channel(str(key), config)
+        if adapter.key not in seen_keys:
+            seen_keys.append(adapter.key)
+            result.append(adapter)
+    return result
+
+
+def get_active_channel(config: dict[str, Any]) -> ChannelAdapter:
+    """Return the PRIMARY adapter (first of ``channels.active``, default bosszp).
+
+    Also caches it process-wide so later ``current_channel()`` calls from deep
+    call chains (sender/monitor internals without config access) return the
+    same instance. Multi-channel collection iterates `:func:`get_active_channels``;
+    this helper stays for the boss-bound sender/monitor paths.
+    """
+    global _ACTIVE
+    adapters = get_active_channels(config)
+    _ACTIVE = adapters[0]
     return _ACTIVE
 
 
@@ -97,6 +123,7 @@ __all__ = [
     "available_channels",
     "get_channel",
     "get_active_channel",
+    "get_active_channels",
     "set_active_channel",
     "current_channel",
 ]

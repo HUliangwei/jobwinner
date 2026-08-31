@@ -13,6 +13,38 @@ class TestChannelRegistry(unittest.TestCase):
         self.assertEqual(ch.key, "bosszp")
         self.assertEqual(ch.domain, "zhipin.com")
 
+
+class TestActiveChannelsMulti(unittest.TestCase):
+    def test_single_string_legacy(self):
+        from jobwinner.channels import get_active_channels
+
+        channels = get_active_channels({"channels": {"active": "bosszp"}})
+        self.assertEqual([c.key for c in channels], ["bosszp"])
+
+    def test_list_returns_all(self):
+        from jobwinner.channels import get_active_channels
+
+        channels = get_active_channels({"channels": {"active": ["bosszp", "zhaopin"]}})
+        self.assertEqual([c.key for c in channels], ["bosszp", "zhaopin"])
+
+    def test_list_dedupes_and_skips_none(self):
+        from jobwinner.channels import get_active_channels
+
+        channels = get_active_channels({"channels": {"active": ["bosszp", "bosszp", None, "zhaopin"]}})
+        self.assertEqual([c.key for c in channels], ["bosszp", "zhaopin"])
+
+    def test_unknown_key_falls_back_to_bosszp(self):
+        from jobwinner.channels import get_active_channels
+
+        channels = get_active_channels({"channels": {"active": ["does-not-exist"]}})
+        self.assertEqual([c.key for c in channels], ["bosszp"])
+
+    def test_primary_is_first(self):
+        from jobwinner.channels import get_active_channel
+
+        ch = get_active_channel({"channels": {"active": ["bosszp", "zhaopin"]}})
+        self.assertEqual(ch.key, "bosszp")
+
     def test_unknown_key_falls_back_to_bosszp(self):
         from jobwinner.channels import get_channel
 

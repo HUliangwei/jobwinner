@@ -18,12 +18,14 @@ def run_pipeline(config: dict) -> None:
         console.print("[red]✗ Browser Runtime 未连接，请先运行 jobwinner connect 查看诊断[/red]")
         return
 
-    from jobwinner.channels import get_active_channel
+    from jobwinner.channels import get_active_channels
 
-    channel = get_active_channel(config)
-    tab = find_tab(channel.domain)
-    if not tab:
-        console.print(f"[red]✗ 未发现 {channel.label} 页面，请先在 Chrome 中打开并登录[/red]")
+    missing = []
+    for ch in get_active_channels(config):
+        if not find_tab(ch.domain):
+            missing.append(ch.label)
+    if missing:
+        console.print(f"[red]✗ 未发现 {'、'.join(missing)} 页面，请先在 Chrome 中打开并登录[/red]")
         return
     console.print("[green]  ✓ 浏览器就绪[/green]\n")
 
