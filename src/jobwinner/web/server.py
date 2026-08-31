@@ -121,6 +121,20 @@ RESUME_DIR = DATA_DIR / "resumes"
 CONFIG_PATH = BASE_DIR / "config.yaml"
 
 
+def _config_rel_path(path: Path) -> str:
+	"""Return a BASE_DIR-relative path string for portable config.yaml.
+
+	Keeps machine-independent paths (e.g. ``./data/resumes/xxx.md``) so the
+	project can be freely moved/migrated without rewriting absolute paths.
+	Falls back to the absolute path when ``path`` lies outside BASE_DIR.
+	"""
+	try:
+		rel = path.resolve().relative_to(BASE_DIR.resolve()).as_posix()
+		return f"./{rel}"
+	except ValueError:
+		return str(path)
+
+
 def set_base_dir(base_dir: Path | str) -> None:
 	"""Set the runtime directory used for config.yaml, data, and uploads."""
 	global BASE_DIR, DATA_DIR, RESUME_DIR, CONFIG_PATH
@@ -1078,7 +1092,7 @@ def api_progress_export():
 		)
 	lines.append("")
 
-	export_dir = Path(r"D:\Desktop\MYNOTE\note\tmp")
+	export_dir = BASE_DIR / "tmp"
 	export_dir.mkdir(parents=True, exist_ok=True)
 	export_path = export_dir / "胡良玮_2027届秋招投递跟踪.md"
 	export_path.write_text("\n".join(lines), encoding="utf-8")
@@ -2291,7 +2305,7 @@ def api_resume_upload():
 			legacy = Path(str(legacy_path))
 			if legacy.exists():
 				existing_paths.append(str(legacy_path))
-		dest_str = str(dest)
+		dest_str = _config_rel_path(dest)
 		if dest_str not in existing_paths:
 			existing_paths.append(dest_str)
 		profile["resume_paths"] = existing_paths
