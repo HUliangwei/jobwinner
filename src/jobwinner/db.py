@@ -672,12 +672,28 @@ def add_risk_event(conn: sqlite3.Connection, event_type: str, detail: str = "") 
 
 
 def get_funnel_stats(conn: sqlite3.Connection, *, today: bool = False) -> dict[str, int]:
-    """Get cumulative or local-calendar-day funnel counts for dashboard."""
+    """Get cumulative or local-calendar-day funnel counts for dashboard.
+
+    口径说明（today=True）：
+    - 采集 / 初筛 / AI评分：按岗位 created_at 落在本地今日（「今日新增岗位」的漏斗推进）；
+    - 确认 / 发送 / 回复 / 拒绝：按 history 动作发生在本地今日（「今天实际发生的动作」）
+      —— 这样「今日发送」反映真实今天发出的数量，而不是「今日新增的岗位里已发出的」
+      （后者几乎恒为 0，因为发送的都是历史采集的岗位）。
+    """
     time_scope = (
         "datetime(created_at, 'localtime') >= datetime('now', 'localtime', 'start of day')"
         if today else "1 = 1"
     )
     scope = f"deleted_at IS NULL AND ({time_scope})"
+
+    def _today_action_count(action: str) -> int:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT job_id) as cnt FROM history "
+            "WHERE action=? AND datetime(created_at, 'localtime') >= datetime('now', 'localtime', 'start of day')",
+            (action,),
+        ).fetchone()
+        return row["cnt"] if row else 0
+
     total = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope}").fetchone()["cnt"]
     prefilter_passed = conn.execute(f"""
         SELECT COUNT(*) as cnt FROM jobs
@@ -699,14 +715,23 @@ def get_funnel_stats(conn: sqlite3.Connection, *, today: bool = False) -> dict[s
             )
           )
     """).fetchone()["cnt"]
-    approved = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status IN ('approved', 'sent', 'replied', 'resume_sent', 'needs_resume', 'follow_up_sent')").fetchone()["cnt"]
-    sent = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status IN ('sent', 'replied', 'resume_sent', 'needs_resume', 'follow_up_sent')").fetchone()["cnt"]
-    replied = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status IN ('replied', 'resume_sent', 'needs_resume')").fetchone()["cnt"]
-    resume_sent = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'resume_sent'").fetchone()["cnt"]
-    needs_resume = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'needs_resume'").fetchone()["cnt"]
+    if today:
+        approved = _today_action_count("approved")
+        sent = _today_action_count("sent")
+        replied = _today_action_count("replied")
+        rejected = _today_action_count("rejected")
+        resume_sent = _today_action_count("resume_sent")
+        needs_resume = _today_action_count("needs_resume")
+        follow_up = _today_action_count("follow_up_sent")
+    else:
+        approved = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status IN ('approved', 'sent', 'replied', 'resume_sent', 'needs_resume', 'follow_up_sent')").fetchone()["cnt"]
+        sent = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status IN ('sent', 'replied', 'resume_sent', 'needs_resume', 'follow_up_sent')").fetchone()["cnt"]
+        replied = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status IN ('replied', 'resume_sent', 'needs_resume')").fetchone()["cnt"]
+        resume_sent = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'resume_sent'").fetchone()["cnt"]
+        needs_resume = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'needs_resume'").fetchone()["cnt"]
+        follow_up = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'follow_up_sent'").fetchone()["cnt"]
+        rejected = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'rejected'").fetchone()["cnt"]
     resume_generated = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND resume_path IS NOT NULL AND TRIM(resume_path) != ''").fetchone()["cnt"]
-    follow_up = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'follow_up_sent'").fetchone()["cnt"]
-    rejected = conn.execute(f"SELECT COUNT(*) as cnt FROM jobs WHERE {scope} AND status = 'rejected'").fetchone()["cnt"]
     return {"采集总数": total, "初筛通过": prefilter_passed, "AI评分": ai_scored, "人工确认": approved, "发送": sent, "回复": replied, "简历已发": resume_sent, "待手动发简历": needs_resume, "简历生成": resume_generated, "跟进": follow_up, "拒绝": rejected}
 
 

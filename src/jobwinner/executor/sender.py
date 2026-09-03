@@ -1273,22 +1273,30 @@ def send_greetings(config: dict, force: bool = False) -> int:
     # Per-channel anti-ban split: bosszp / zhaopin get INDEPENDENT daily quota,
     # send interval and progressive backoff, so one platform being rate-limited
     # or busy never throttles the other. Config: throttle.channel_overrides.<key>.
+    # daily_limit <= 0 (or None/"unlimited") means no daily cap — throttling is
+    # then driven purely by the randomized interval + extra pauses below.
     daily_limit = throttle_config.get("daily_limit", 30)
     interval_min = throttle_config.get("interval_min", 60)
     interval_max = throttle_config.get("interval_max", 180)
+    extra_pause_probability = float(throttle_config.get("extra_pause_probability", 0.05))
+    extra_pause_min = float(throttle_config.get("extra_pause_min", 2.0))
+    extra_pause_max = float(throttle_config.get("extra_pause_max", 30.0))
 
     def _today_sent_for_channel(channel_key: str) -> int:
         # 历史岗位的 channel 可能为空/旧数据，一律计入默认主渠道（bosszp）。
+        # 注意：数据库存 UTC，本地 UTC+8 的凌晨 0-8 点会落在 UTC 的"昨天"，
+        # 用 date('now') 会把当天凌晨发的算成昨天，导致配额/今日已发虚低。
+        # 这里统一用 localtime 口径（与 get_funnel_stats 的今日口径一致）。
         if channel_key in ("", "bosszp"):
             row = db.execute(
                 "SELECT COUNT(*) as cnt FROM history h JOIN jobs j ON h.job_id=j.id "
-                "WHERE h.action='sent' AND date(h.created_at)=date('now') "
+                "WHERE h.action='sent' AND date(h.created_at,'localtime')=date('now','localtime') "
                 "AND (j.channel IS NULL OR j.channel='' OR j.channel='bosszp')"
             ).fetchone()
         else:
             row = db.execute(
                 "SELECT COUNT(*) as cnt FROM history h JOIN jobs j ON h.job_id=j.id "
-                "WHERE h.action='sent' AND date(h.created_at)=date('now') "
+                "WHERE h.action='sent' AND date(h.created_at,'localtime')=date('now','localtime') "
                 "AND j.channel=?", (channel_key,)
             ).fetchone()
         return row["cnt"] if row else 0
@@ -1302,18 +1310,28 @@ def send_greetings(config: dict, force: bool = False) -> int:
         st = channel_states.get(ch)
         if st is None:
             tc = _merge_channel_throttle(ch, throttle_config)
+            raw_limit = tc.get("daily_limit", daily_limit)
+            # 0 / None / "unlimited" → 无每日上限
+            limit = None if (raw_limit is None or str(raw_limit).strip().lower() in ("0", "", "unlimited", "none")) else int(raw_limit)
             st = {
                 "key": ch,
-                "limit": int(tc.get("daily_limit", daily_limit)),
+                "limit": limit,
                 "sent_today": _today_sent_for_channel(ch),
                 "interval_min": float(tc.get("interval_min", interval_min)),
                 "interval_max": float(tc.get("interval_max", interval_max)),
+                "extra_pause_probability": float(tc.get("extra_pause_probability", extra_pause_probability)),
+                "extra_pause_min": float(tc.get("extra_pause_min", extra_pause_min)),
+                "extra_pause_max": float(tc.get("extra_pause_max", extra_pause_max)),
                 "throttle": None,
                 "backoff": None,
                 "interval_used": False,
                 "risk_paused": False,
             }
             channel_states[ch] = st
+        if st["limit"] is None:
+            jobs_to_send.append(job)
+            st.setdefault("scheduled", []).append(job)
+            continue
         remaining = st["limit"] - st["sent_today"] - len(st.setdefault("scheduled", []))
         if remaining <= 0:
             quota_deferred += 1
@@ -1335,7 +1353,13 @@ def send_greetings(config: dict, force: bool = False) -> int:
 
     def _state_throttle(st: dict) -> RequestThrottle:
         if st["throttle"] is None:
-            st["throttle"] = RequestThrottle(delay_min=st["interval_min"], delay_max=st["interval_max"])
+            st["throttle"] = RequestThrottle(
+                delay_min=st["interval_min"],
+                delay_max=st["interval_max"],
+                extra_pause_probability=st["extra_pause_probability"],
+                extra_pause_min=st["extra_pause_min"],
+                extra_pause_max=st["extra_pause_max"],
+            )
         return st["throttle"]
 
     def _state_backoff(st: dict) -> ProgressiveBackoff:
@@ -1364,7 +1388,10 @@ def send_greetings(config: dict, force: bool = False) -> int:
             # Progress reporting must never break the send loop
             pass
 
-    quota_note = " / ".join(f"{v['key']} {v['sent_today']}/{v['limit']}" for v in channel_states.values())
+    quota_note = " / ".join(
+        f"{v['key']} {v['sent_today']}/{'不限' if v['limit'] is None else v['limit']}"
+        for v in channel_states.values()
+    )
     console.print(f"[bold]准备发送 {len(jobs_to_send)} 条招呼语[/bold] (今日已发 {quota_note})")
 
     with Progress(

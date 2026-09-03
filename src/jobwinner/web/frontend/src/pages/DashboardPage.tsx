@@ -40,7 +40,6 @@ import {
 
 type WorkbenchMode = 'full' | 'collect' | 'rescore' | 'score' | 'monitor' | 'deliver'
 type DashboardView = 'workbench' | 'jobs' | 'monitor'
-type StatsScope = 'today' | 'total'
 
 const TASK_STAGE_LABELS = [
   '开始采集岗位',
@@ -174,17 +173,31 @@ const PIPELINE_FUNNEL: Array<{ label: string; key: string }> = [
   { label: '发送', key: '发送' },
 ]
 
-function PipelineStatusBar({ funnel }: { funnel: FunnelData }) {
+function PipelineStatusBar({
+  funnel,
+  funnelTotal,
+  pendingConfirm,
+}: {
+  funnel: FunnelData
+  funnelTotal: FunnelData
+  pendingConfirm: number
+}) {
   const head = funnel['采集总数'] || 0
   return (
     <div className="rounded-2xl border border-card-border bg-[#FFFCFA] p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs font-black tracking-[0.18em] text-primary">PIPELINE 管道状态</div>
-        <div className="text-[10px] font-bold text-muted">采集 → 评分 → 确认 → 发送（累计漏斗）</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-[#FFF0E5] px-2.5 py-1 text-[11px] font-black text-primary">
+            当前待确认 {pendingConfirm}
+          </span>
+          <span className="text-[10px] font-bold text-muted">大字为今日 · 小字为累计</span>
+        </div>
       </div>
       <div className="flex gap-1.5">
         {PIPELINE_FUNNEL.map((stage, index) => {
           const value = funnel[stage.key] || 0
+          const totalValue = funnelTotal[stage.key] || 0
           const ratio = head > 0 ? Math.min(1, value / head) : 0
           const intensity = 0.10 + ratio * 0.85
           const dark = intensity > 0.55
@@ -196,6 +209,7 @@ function PipelineStatusBar({ funnel }: { funnel: FunnelData }) {
             >
               <div className={`truncate text-[10px] font-bold ${dark ? 'text-white/80' : 'text-primary'}`}>{stage.label}</div>
               <div className={`mt-0.5 text-lg font-black tabular-nums ${dark ? 'text-white' : 'text-foreground'}`}>{value}</div>
+              <div className={`mt-0.5 text-[10px] font-bold tabular-nums ${dark ? 'text-white/70' : 'text-muted'}`}>累计 {totalValue}</div>
               <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/30">
                 <div
                   className="h-full rounded-full bg-white/90"
@@ -209,14 +223,6 @@ function PipelineStatusBar({ funnel }: { funnel: FunnelData }) {
     </div>
   )
 }
-
-const statItems = [
-  { key: '采集总数', todayLabel: '今日新增岗位', totalLabel: '累计采集岗位' },
-  { key: '初筛通过', todayLabel: '今日初筛通过', totalLabel: '累计初筛通过', highlight: true },
-  { key: 'AI评分', todayLabel: '今日 AI 评分', totalLabel: '累计 AI 评分' },
-  { key: 'pending', todayLabel: '当前待确认', totalLabel: '当前待确认', highlight: true, current: true },
-  { key: '发送', todayLabel: '今日已投递', totalLabel: '累计已投递', highlight: true },
-]
 
 const METRIC_DEFS: Record<string, { key: string; label: string }> = {
   collect_seen: { key: 'collect_seen', label: '本轮扫描' },
@@ -437,7 +443,6 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
   const [modePending, setModePending] = useState<WorkbenchMode | null>(null)
   const [confirmedDeliveryIds, setConfirmedDeliveryIds] = useState<Set<string>>(new Set())
   const [todayFilters, setTodayFilters] = useState<JobFilters>({ ...EMPTY_JOB_FILTERS })
-  const [statsScope, setStatsScope] = useState<StatsScope>('today')
   const [editGreetingJob, setEditGreetingJob] = useState<Job | null>(null)
   const [editGreetingText, setEditGreetingText] = useState('')
   const [editGreetingSaving, setEditGreetingSaving] = useState(false)
@@ -826,13 +831,15 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
 
   return (
     <div className="space-y-5">
+      {/* 求职数据总区块：管道状态（今日大字 + 累计小字，一行全信息） */}
       <section id="today-workbench" className="scroll-mt-6 rounded-3xl border border-card-border bg-white p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <div className="text-xs font-black tracking-[0.18em] text-primary">TODAY WORKBENCH</div>
-            <h2 className="mt-1 text-3xl font-black tracking-tight">今日求职行动</h2>
+            <div className="text-xs font-black tracking-[0.18em] text-primary">WORKBENCH DATA</div>
+            <h2 className="mt-1 text-3xl font-black tracking-tight">求职数据</h2>
+            <p className="mt-1 text-xs text-muted">今日看行动节奏，累计看岗位池沉淀。</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="text-right">
               <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing}>
                 <RefreshCw className={cn('mr-2 h-4 w-4', refreshing && 'animate-spin')} />
@@ -850,56 +857,13 @@ export default function DashboardPage({ view = 'workbench' }: DashboardPageProps
           </div>
         </div>
 
-
-        <PipelineStatusBar funnel={workbench.funnel} />
+        <PipelineStatusBar
+          funnel={workbench.funnel_today}
+          funnelTotal={workbench.funnel}
+          pendingConfirm={workbench.pending_confirmation.length}
+        />
 
         {/* 任务状态卡已下放到各功能区（采集/评分/发送/监测），此处不再重复展示 */}
-      </section>
-
-      <section>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-black">求职数据</h3>
-            <p className="mt-0.5 text-xs text-muted">今日看行动节奏，累计看岗位池沉淀。</p>
-          </div>
-          <div className="inline-flex rounded-full border border-card-border bg-white p-1">
-            {([
-              { value: 'today' as const, label: '今日数据' },
-              { value: 'total' as const, label: '累计数据' },
-            ]).map(option => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setStatsScope(option.value)}
-                className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
-                  statsScope === option.value ? 'bg-primary text-white shadow-sm' : 'text-muted hover:text-primary'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          {statItems.map(item => {
-            const currentValue = workbench.pending_confirmation.length
-            const selectedFunnel = statsScope === 'today' ? workbench.funnel_today : workbench.funnel
-            const alternateFunnel = statsScope === 'today' ? workbench.funnel : workbench.funnel_today
-            const value = item.current ? currentValue : (selectedFunnel[item.key] || 0)
-            const supportingText = item.current
-              ? '实时待处理数量'
-              : `${statsScope === 'today' ? '累计' : '今日'} ${alternateFunnel[item.key] || 0}`
-            return (
-              <div key={item.key} className="rounded-2xl border border-card-border bg-white p-4">
-                <div className="text-xs text-muted">{statsScope === 'today' ? item.todayLabel : item.totalLabel}</div>
-                <div className={`mt-1 text-2xl font-black ${item.highlight ? 'text-primary' : 'text-foreground'}`}>
-                  {value}
-                </div>
-                <div className="mt-1 text-[10px] font-bold text-muted">{supportingText}</div>
-              </div>
-            )
-          })}
-        </div>
       </section>
 
       {/* 工作流 —— 模式开关一行 + 任务状态区一行（状态卡带模式标签对应） */}

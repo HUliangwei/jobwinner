@@ -87,9 +87,12 @@ DEFAULTS: dict[str, Any] = {
         "max_candidates": 20,
     },
     "throttle": {
-        "daily_limit": 20,
+        "daily_limit": 0,
         "interval_min": 60,
         "interval_max": 180,
+        "extra_pause_probability": 0.2,
+        "extra_pause_min": 30,
+        "extra_pause_max": 150,
         "browse_before_greet": True,
         "browse_duration_min": 15,
         "browse_duration_max": 30,

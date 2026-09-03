@@ -58,9 +58,19 @@ class GlobalRequestGate:
 class RequestThrottle:
     """Rate limiter with Gaussian-distributed delays and burst detection."""
 
-    def __init__(self, delay_min: float = 60.0, delay_max: float = 180.0) -> None:
+    def __init__(
+        self,
+        delay_min: float = 60.0,
+        delay_max: float = 180.0,
+        extra_pause_probability: float = 0.05,
+        extra_pause_min: float = 2.0,
+        extra_pause_max: float = 30.0,
+    ) -> None:
         self._delay_min = delay_min
         self._delay_max = delay_max
+        self._extra_pause_probability = extra_pause_probability
+        self._extra_pause_min = extra_pause_min
+        self._extra_pause_max = extra_pause_max
         self._last_request_time = 0.0
         self._recent_times: deque = deque(maxlen=12)
 
@@ -71,9 +81,11 @@ class RequestThrottle:
         std = (self._delay_max - self._delay_min) / 4
         base_sleep = max(0, random.gauss(mean, std) - elapsed)
 
-        # 5% chance of a longer pause — mimics human hesitation
-        if random.random() < 0.05:
-            base_sleep += random.uniform(2.0, 5.0)
+        # Random chance of a longer pause — mimics human hesitation.
+        # Probability and length are configurable (extra_pause_*) so users can
+        # dial up randomness while keeping the base interval unchanged.
+        if random.random() < self._extra_pause_probability:
+            base_sleep += random.uniform(self._extra_pause_min, self._extra_pause_max)
 
         burst = self._burst_penalty()
         global_penalty = GlobalRequestGate.burst_penalty()
