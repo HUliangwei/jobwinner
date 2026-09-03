@@ -707,6 +707,7 @@ def get_funnel_stats(conn: sqlite3.Connection, *, today: bool = False) -> dict[s
             status IN ('scored', 'ready', 'approved', 'rejected', 'sent', 'replied', 'resume_sent', 'needs_resume', 'follow_up_sent')
             OR (
                 status = 'filtered'
+                AND score > 0
                 AND COALESCE(score_reason, '') != ''
                 AND score_reason NOT LIKE '预筛不通过:%'
                 AND score_reason NOT LIKE 'AI评分失败:%'
